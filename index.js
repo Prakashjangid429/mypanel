@@ -45,21 +45,21 @@ async function hitApi200TimesConcurrently(url, basePayload = {}, config = {}) {
 
 connectDB().then(() => {
   logger.info('Database connected successfully');
-  hitApi200TimesConcurrently(
-    'http://localhost:3000/api/v1/payment/create',
-    {
-      amount: 100,
-      email: 'prakash@gmail.com',
-      mobileNumber: '9992829898',
-      name: 'prakash'
-    },
-    {
-      headers: {
-        'authorization': 'eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJjbGllbnRfaWQiOiJVSUQtTUI3VVAwVUYtMlc0Sk9UIn0.r_QmH6s35gPNVPqMhXpwuKw86iFgEpQAn_SkbJFFbuEJbQaSFxB4lnYcUJZIRNk5',
-        'client-id': 'UID-MB7UP0UF-2W4JOT'
-      }
-    }
-  );
+  // hitApi200TimesConcurrently(
+  //   'http://localhost:3000/api/v1/payment/create',
+  //   {
+  //     amount: 100,
+  //     email: 'prakash@gmail.com',
+  //     mobileNumber: '9992829898',
+  //     name: 'prakash'
+  //   },
+  //   {
+  //     headers: {
+  //       'authorization': 'eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9.eyJjbGllbnRfaWQiOiJVSUQtTUI3VVAwVUYtMlc0Sk9UIn0.r_QmH6s35gPNVPqMhXpwuKw86iFgEpQAn_SkbJFFbuEJbQaSFxB4lnYcUJZIRNk5',
+  //       'client-id': 'UID-MB7UP0UF-2W4JOT'
+  //     }
+  //   }
+  // );
 
 })
 

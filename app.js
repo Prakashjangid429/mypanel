@@ -26,7 +26,7 @@ const app = express();
 
 app.use(helmet());
 app.use(cors());
-app.use(logRequest);
+// app.use(logRequest);
 
 const limiter = rateLimit({
   max: 100,
@@ -38,7 +38,6 @@ const limiter = rateLimit({
 // app.use(morgan());
 // app.use(xss());
 // app.use(mongoSanitize());
-
 
 app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
@@ -84,6 +83,15 @@ app.post('/dummy-gateway', async (req, res) => {
   }, delay);
 
   res.json(responsePayload);
+});
+
+app.post("/user-callback", async (req, res) => {
+  try {
+    res.status(200).json({ status: "success", message: "Callback processed successfully" });
+  } catch (error) {
+    console.error("Error processing callback:", error);
+    res.status(500).json({ status: "error", message: "Failed to process callback" });
+  }
 });
 
 

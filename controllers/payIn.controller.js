@@ -4,6 +4,8 @@ import User from "../models/user.model.js";
 import payinModel from "../models/payin.model.js";
 import { Mutex } from 'async-mutex';
 import EwalletTransaction from "../models/ewallet.model.js";
+import userMetaModel from "../models/userMeta.model.js";
+import mongoose from "mongoose";
 
 export const generatePayment = async (req, res, next) => {
     try {
@@ -132,10 +134,9 @@ export const checkPaymentStatus = async (req, res, next) => {
         return res.status(200).json(response);
 
     } catch (error) {
-        next(error)
+        return next(error)
     }
 };
-
 
 const userLocks = new Map();
 
@@ -174,42 +175,80 @@ export const payinCallback = async (req, res, next) => {
         const userMutex = getUserMutex(userId);
 
         await userMutex.runExclusive(async () => {
-            if (status === 'success') {
-                const netAmount = paymentRecord.amount - paymentRecord.chargeAmount;
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    const netAmount = paymentRecord.amount - paymentRecord.chargeAmount;
 
-                const user = await User.findOneAndUpdate(
-                    { _id: paymentRecord.user_id },
-                    { $inc: { eWalletBalance: netAmount } },
-                    { new: true }
-                );
+                    const [user, userMeta] = await Promise.all([
+                        User.findOneAndUpdate(
+                            { _id: paymentRecord.user_id },
+                            { $inc: { eWalletBalance: netAmount } },
+                            { new: true, session }
+                        ),
+                        userMetaModel.findOne({ userId: paymentRecord.user_id }).session(session)
+                    ]);
 
-                const payinSuccess = {
-                    user_id: paymentRecord.user_id,
-                    txnId: paymentRecord.txnId,
-                    utr: paymentRecord.utr,
-                    referenceID: paymentRecord.refId,
-                    amount: paymentRecord.amount,
-                    chargeAmount: paymentRecord.chargeAmount,
-                    vpaId: 'abc@upi',
-                    payerName: paymentRecord.name,
-                    status: 'Success',
-                    description: `PayIn successful for txnId ${paymentRecord.txnId}`,
-                };
-                console.log(user.eWalletBalance)
-                const walletTransaction = {
-                    userId: paymentRecord.user_id,
-                    amount:  paymentRecord.amount,
-                    charges: paymentRecord.chargeAmount,
-                    type: 'credit',
-                    afterAmount: user.eWalletBalance,
-                    description: `PayIn successful for txnId ${paymentRecord.txnId}`,
-                    status: 'success',
-                };
+                    if (status === 'success') {
+                        const payinSuccess = {
+                            user_id: paymentRecord.user_id,
+                            txnId: paymentRecord.txnId,
+                            utr: paymentRecord.utr,
+                            referenceID: paymentRecord.refId,
+                            amount: paymentRecord.amount,
+                            chargeAmount: paymentRecord.chargeAmount,
+                            vpaId: 'abc@upi',
+                            payerName: paymentRecord.name,
+                            status: 'Success',
+                            description: `PayIn successful for txnId ${paymentRecord.txnId}`,
+                        };
 
-                await Promise.all([
-                    payinModel.create(payinSuccess),
-                    EwalletTransaction.create(walletTransaction)
-                ]);
+                        const walletTransaction = {
+                            userId: paymentRecord.user_id,
+                            amount: paymentRecord.amount,
+                            charges: paymentRecord.chargeAmount,
+                            type: 'credit',
+                            afterAmount: user.eWalletBalance,
+                            description: `PayIn successful for txnId ${paymentRecord.txnId}`,
+                            status: 'success',
+                        };
+
+                        await Promise.all([
+                            payinModel.create([payinSuccess], { session }),
+                            EwalletTransaction.create([walletTransaction], { session })
+                        ]);
+
+                        axios.post("http://localhost:3000/user-callback", {
+                            event: 'payin_success',
+                            txnId: paymentRecord.txnId,
+                            status: 'Success',
+                            status_code: 200,
+                            amount: paymentRecord.amount,
+                            gatwayCharge: paymentRecord.chargeAmount,
+                            utr: paymentRecord.utr,
+                            vpaId: 'abc@upi',
+                            txnCompleteDate: new Date(),
+                            txnStartDate: paymentRecord.createdAt,
+                            message: 'Payment Received successfully',
+                        });
+
+                    } else if (status === 'failed') {
+                        axios.post("http://localhost:3000/user-callback", {
+                            event: 'payin_failed',
+                            txnId: paymentRecord.txnId,
+                            status: 'Failed',
+                            status_code: 200,
+                            amount: paymentRecord.amount,
+                            utr: null,
+                            vpaId: null,
+                            txnStartDate: paymentRecord.createdAt,
+                            message: 'Payment failed',
+                        });
+                        console.log("Payment failed for txnId:", txnId);
+                    }
+                })
+            } finally {
+                session.endSession();
             }
         });
 
@@ -219,139 +258,9 @@ export const payinCallback = async (req, res, next) => {
             message: 'Payment status updated successfully',
         });
     } catch (error) {
-        next(error);
+        return next(error);
     }
 };
-
-
-import Redis from 'ioredis';
-import Redlock from 'redlock';
-import mongoose from "mongoose";
-
-// Redis connection
-const redis = new Redis({
-  host: '127.0.0.1', // Update if needed
-  port: 6379,
-});
-
-const redlock = new Redlock([redis], {
-  retryCount: 2,
-  retryDelay: 1000,
-  retryJitter: 500,
-});
-
-export const payinCallbackwithRedis = async (req, res, next) => {
-  const session = await mongoose.startSession();
-  const { txnId, utr, status, refId, message } = req.body;
-
-  try {
-    const paymentRecord = await PayinGenerationRecord.findOne({ txnId });
-
-    if (!paymentRecord || paymentRecord.status !== 'Pending') {
-      return res.status(404).json({
-        status: 'Failed',
-        status_code: 404,
-        message: 'Transaction not found or already processed',
-      });
-    }
-
-    const userId = paymentRecord.user_id.toString();
-    const lockKey = `locks:user:${userId}`;
-
-    // Redlock usage
-    await redlock.using([lockKey], 8000, async () => {
-      session.startTransaction();
-
-      try {
-        if (status === 'success') {
-          const netAmount = paymentRecord.amount - paymentRecord.chargeAmount;
-
-          // Update wallet
-          const updatedUser = await User.findOneAndUpdate(
-            { _id: paymentRecord.user_id },
-            { $inc: { eWalletBalance: netAmount } },
-            { new: true, session }
-          );
-
-          // Update Payin Record
-          paymentRecord.status = 'Success';
-          paymentRecord.utr = utr;
-          paymentRecord.refId = refId;
-          await paymentRecord.save({ session });
-
-          // Create success logs
-          const payinSuccess = {
-            user_id: updatedUser._id,
-            txnId: paymentRecord.txnId,
-            utr: paymentRecord.utr,
-            referenceID: paymentRecord.refId,
-            amount: paymentRecord.amount,
-            chargeAmount: paymentRecord.chargeAmount,
-            vpaId: 'abc@upi', // Adjust if dynamic
-            payerName: paymentRecord.name,
-            status: 'Success',
-            description: `PayIn successful for txnId ${paymentRecord.txnId}`,
-          };
-
-          const walletTransaction = {
-            userId: updatedUser._id,
-            amount: netAmount,
-            charges: paymentRecord.chargeAmount,
-            type: 'credit',
-            afterAmount: updatedUser.eWalletBalance,
-            description: `PayIn successful for txnId ${paymentRecord.txnId}`,
-            status: 'success',
-          };
-
-          await Promise.all([
-            payinModel.create([payinSuccess], { session }),
-            EwalletTransaction.create([walletTransaction], { session }),
-          ]);
-        } else if (status === 'failed') {
-          paymentRecord.status = 'Failed';
-          paymentRecord.failureReason = message || 'Payment failed';
-          await paymentRecord.save({ session });
-        } else {
-          await session.abortTransaction();
-          return res.status(400).json({
-            status: 'Failed',
-            status_code: 400,
-            message: 'Invalid status provided',
-          });
-        }
-
-        await session.commitTransaction();
-      } catch (innerErr) {
-        await session.abortTransaction();
-        throw innerErr;
-      }
-    });
-
-    return res.status(200).json({
-      status: 'Success',
-      status_code: 200,
-      message: 'Payment status updated successfully',
-    });
-  } catch (error) {
-    await session.abortTransaction().catch(() => { });
-
-    // Proper Redlock error handling
-    if (error?.name === 'ExecutionError') {
-      return res.status(423).json({
-        status: 'Failed',
-        status_code: 423,
-        message: 'Resource is currently locked. Please retry shortly.',
-      });
-    }
-
-    console.error('Callback error:', error);
-    return next(error);
-  } finally {
-    session.endSession();
-  }
-};
-
-
 
 
 

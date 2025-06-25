@@ -18,8 +18,7 @@ export const getAllPayInApis = catchAsync(async (req, res, next) => {
 
   const matchStage = {};
 
-  // Add filters dynamically
-  if (isActive !== undefined) {
+  if (isActive) {
     matchStage.isActive = isActive == "true";
   }
 

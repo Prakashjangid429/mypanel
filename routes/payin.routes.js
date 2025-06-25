@@ -1,7 +1,7 @@
 import express from "express";
 import { celebrate } from "celebrate";
 import Joi from 'joi';
-import { generatePayment, checkPaymentStatus, payinCallback,payinCallbackwithRedis } from "../controllers/payIn.controller.js";
+import { generatePayment, checkPaymentStatus, payinCallback } from "../controllers/payIn.controller.js";
 import { verifyToken } from "../middleware/apiToken.js";
 
 const createPayInSchema = {
@@ -13,7 +13,6 @@ const createPayInSchema = {
         name: Joi.string().required()
     }),
     headers: Joi.object({
-        'client-id': Joi.string().required(),
         'authorization': Joi.string().required()
     }).unknown(true)
 };
@@ -32,7 +31,6 @@ router.get(
             txnId: Joi.string().required()
         }),
         headers: Joi.object({
-            'client-id': Joi.string().required(),
             'authorization': Joi.string().required()
         }).unknown(true)
     }), verifyToken, checkPaymentStatus

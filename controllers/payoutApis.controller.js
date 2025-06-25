@@ -18,7 +18,7 @@ export const getAllPayoutApis = catchAsync(async (req, res, next) => {
 
   const filters = {};
 
-  if (isActive !== undefined) {
+  if (isActive) {
     filters.isActive = isActive === "true";
   }
 

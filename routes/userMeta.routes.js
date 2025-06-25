@@ -33,10 +33,10 @@ router.post('/upsert', celebrate({
 }), upsertUserMeta);
 
 router.get('/me', getUserMeta);
+router.put('/whitelist', updateWhitelistedIPs);
 
 // Admin Routes
 router.get('/:userId',restrictTo('Admin'), getMetaByUserId);
-router.put('/whitelist',restrictTo('Admin'), updateWhitelistedIPs);
 router.delete('/:userId',restrictTo('Admin'), deleteUserMeta);
 
 export default router;

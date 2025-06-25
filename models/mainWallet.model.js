@@ -23,11 +23,16 @@ const mainWalletTransactionSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: ['credit', 'debit'],
-      required: true
+      required: true,
+      default: 'credit'
     },
     description: {
       type: String,
       default: ''
+    },
+    beforeAmount: {
+      type: Number,
+      required: true
     },
     afterAmount: {
       type: Number,

@@ -25,6 +25,10 @@ const ewalletTransactionSchema = new mongoose.Schema(
       type: String,
       default: ''
     },
+    beforeAmount: {
+      type: Number,
+      required: true
+    },
     afterAmount: {
       type: Number,
       required: true

@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 import User from '../models/user.model.js';
 import AppError from '../utils/appError.js';
+import catchAsync from '../utils/catchAsync.js';
+import EwalletTransaction from '../models/ewallet.model.js';
+import MainWalletTransaction from '../models/mainWallet.model.js';
+import payoutRecordModel from '../models/payoutRecord.model.js';
 
 const generateTokens = (user) => {
   const accessToken = user.generateAccessToken();
@@ -34,19 +38,14 @@ export const registerUser = async (req, res, next) => {
       password,
       passwordConfirm,
       trxPassword,
-      trxPasswordConfirm,
       package: pkg,
       minWalletBalance,
       address
     } = req.body;
 
-    if (password !== passwordConfirm) {
-      return next(new AppError('Passwords do not match', 400));
-    }
-
-    if (trxPassword !== trxPasswordConfirm) {
-      return next(new AppError('Transaction passwords do not match', 400));
-    }
+    // if (password !== passwordConfirm) {
+    //   return next(new AppError('Passwords do not match', 400));
+    // }
 
     const existingUser = await User.findOne({ $or: [{ email }, { userName }, { mobileNumber }] });
     if (existingUser) {
@@ -62,7 +61,7 @@ export const registerUser = async (req, res, next) => {
       password,
       trxPassword,
       package: pkg,
-      minWalletBalance,
+      minWalletBalance: Number(minWalletBalance),
       address,
       isActive: true
     });
@@ -86,7 +85,7 @@ export const registerUser = async (req, res, next) => {
       refreshToken
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -122,35 +121,109 @@ export const loginUser = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'Login successful',
-      user: userData,
+      // user: userData,
       accessToken,
       refreshToken
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-export const getUserProfile = async (req, res, next) => {
+export const updateBankDetails = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user._id);
+    const allowedUpdates = [
+      'bankName',
+      'accountNumber',
+      'accountHolderName',
+      'ifscCode'
+    ];
+
+    const updates = Object.keys(req.body);
+    const isValidUpdate = updates.every(update => allowedUpdates.includes(update));
+
+    if (!isValidUpdate) {
+      return next(new AppError('Invalid updates for bank details!', 400));
+    }
+
+    const requiredFields = ['accountNumber', 'ifscCode', 'accountHolderName'];
+    const missingFields = requiredFields.filter(field => !req.body[field]);
+
+    if (missingFields.length > 0) {
+      return next(new AppError(
+        `Missing required fields: ${missingFields.join(', ')}`,
+        400
+      ));
+    }
+
+    if (!/^\d{9,18}$/.test(req.body.accountNumber)) {
+      return next(new AppError(
+        'Account number must be 9-18 digits long and contain only numbers',
+        400
+      ));
+    }
+
+    if (!/^[A-Za-z]{4}0[A-Za-z0-9]{6}$/.test(req.body.ifscCode)) {
+      return next(new AppError(
+        'IFSC code must be 11 characters in format: ABCD0123456',
+        400
+      ));
+    }
+
+    const bankDetailsUpdate = {};
+    updates.forEach(update => {
+      bankDetailsUpdate[`bankDetails.${update}`] = req.body[update].trim();
+    });
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: bankDetailsUpdate },
+      {
+        new: true,
+        runValidators: true,
+        select: '-password -__v' // Exclude sensitive fields
+      }
+    );
+
     if (!user) {
       return next(new AppError('User not found', 404));
     }
 
     res.status(200).json({
       success: true,
+      message: 'Bank details updated successfully',
+    });
+  } catch (error) {
+    if (error.code === 11000 && error.keyPattern['bankDetails.accountNumber']) {
+      return next(new AppError(
+        'This account number is already registered',
+        400
+      ));
+    }
+    return next(error);
+  }
+};
+
+export const getUserProfile = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user._id).select("-payInApi -payOutApi -package").lean();
+    if (!user) {
+      return next(new AppError('User not found', 404));
+    }
+    res.status(200).json({
+      success: true,
       user
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const updateUserProfile = async (req, res, next) => {
   try {
-    const allowedUpdates = ['fullName', 'mobileNumber', 'address', 'minWalletBalance'];
+    const allowedUpdates = ['fullName', 'mobileNumber', 'address'];
     const updates = Object.keys(req.body);
+    console.log(updates)
     const isValidUpdate = updates.every(update => allowedUpdates.includes(update));
 
     if (!isValidUpdate) {
@@ -171,7 +244,7 @@ export const updateUserProfile = async (req, res, next) => {
       user
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -204,7 +277,7 @@ export const changePassword = async (req, res, next) => {
       message: 'Password changed successfully',
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -237,7 +310,7 @@ export const changeTrxPassword = async (req, res, next) => {
       message: 'Transaction password changed successfully'
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -256,44 +329,161 @@ export const logoutUser = async (req, res, next) => {
       message: 'Logged out successfully'
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const getAllUsers = async (req, res, next) => {
   try {
+    // Pagination
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const filter = {};
-    if (req.query.role) filter.role = req.query.role;
-    if (req.query.isActive) filter.isActive = req.query.isActive === 'true';
+    // Filters
+    const matchStage = {};
 
-    const sort = req.query.sort || '-createdAt';
+    if (req.query.role) matchStage.role = req.query.role;
+    if (req.query.isActive)
+      matchStage.isActive = req.query.isActive == 'true';
 
-    const users = await User.find(filter)
-      .sort(sort)
-      .skip(skip)
-      .limit(limit)
-      .select('+password +trxPassword +secretToken'); // Exclude sensitive fields
+    const sortField = req.query.sort || '-createdAt';
+    const sortDirection = sortField.startsWith('-') ? -1 : 1;
+    const sortKey = sortField.replace(/^-/, '');
 
-    const totalUsers = await User.countDocuments(filter);
+    const sortStage = {};
+    sortStage[sortKey] = sortDirection;
+
+    // Build Aggregation Pipeline
+    const pipeline = [];
+
+    // Match Stage
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
+
+    // Lookup for Commission Package (example)
+    pipeline.push({
+      $lookup: {
+        from: "commissionpackages", // collection name of CommissionPackage model
+        localField: "package",
+        foreignField: "_id",
+        as: "packageInfo"
+      }
+    });
+
+    // Unwind package info
+    pipeline.push({
+      $unwind: {
+        path: "$packageInfo",
+        preserveNullAndEmptyArrays: true
+      }
+    });
+
+    // Lookup for PayIn Api (optional)
+    pipeline.push({
+      $lookup: {
+        from: "payinapis", // collection name of PayInApi model
+        localField: "payInApi",
+        foreignField: "_id",
+        as: "payInApiInfo"
+      }
+    });
+
+    pipeline.push({
+      $unwind: {
+        path: "$payInApiInfo",
+        preserveNullAndEmptyArrays: true
+      }
+    });
+
+    // Lookup for Payout Api (optional)
+    pipeline.push({
+      $lookup: {
+        from: "payoutapis", // collection name of PayoutApi model
+        localField: "payOutApi",
+        foreignField: "_id",
+        as: "payOutApiInfo"
+      }
+    });
+
+    pipeline.push({
+      $unwind: {
+        path: "$payOutApiInfo",
+        preserveNullAndEmptyArrays: true
+      }
+    });
+
+    // Add fullAddress from virtual
+    pipeline.push({
+      $addFields: {
+        fullAddress: {
+          $cond: [
+            {
+              $and: [
+                { $ne: ["$address.street", null] },
+                { $ne: ["$address.city", null] }
+              ]
+            },
+            {
+              $concat: [
+                "$address.street", ", ",
+                "$address.city", ", ",
+                "$address.state", ", ",
+                "$address.country", " - ",
+                "$address.postalCode"
+              ]
+            },
+            "N/A"
+          ]
+        }
+      }
+    });
+
+    // Sort Stage
+    pipeline.push({ $sort: sortStage });
+
+    // Count Total Documents Before Pagination
+    const totalPipeline = [...pipeline];
+    totalPipeline.push({ $count: "total" });
+
+    const totalCount = await User.aggregate(totalPipeline);
+    const totalUsers = totalCount.length ? totalCount[0].total : 0;
     const totalPages = Math.ceil(totalUsers / limit);
 
+    // Pagination Stage
+    pipeline.push({ $skip: skip }, { $limit: limit });
 
-    res.status(200).json({
+    // Run Aggregation
+    const users = await User.aggregate(pipeline);
+
+    // Send Response
+    return res.status(200).json({
       success: true,
       count: users.length,
       totalUsers,
       totalPages,
       currentPage: page,
-      users: users.map(user => ({
-        ...user.toObject()
-      }))
+      users
     });
   } catch (error) {
-    next(error);
+    return next(error);
+  }
+};
+
+export const flatenUsers = async (req, res, next) => {
+  try {
+    const users = await User.find({})
+      .select('userName email _id') // Only return these fields
+      .lean(); // Convert to plain JavaScript objects
+
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      users
+    });
+  } catch (error) {
+    return next(error);
   }
 };
 
@@ -302,22 +492,26 @@ export const toggleUserStatus = async (req, res, next) => {
     const { userId } = req.params;
     const { status } = req.body; // Expects boolean true/false
 
-    if (typeof status !== 'boolean') {
+    if (typeof status != 'boolean') {
       return next(new AppError('Status must be a boolean value (true/false)', 400));
     }
+
+    if (userId === req.user._id.toString()) {
+      return next(new AppError('You cannot modify your own status', 403));
+    }
+
     const user = await User.findOneAndUpdate(
       {
-        _id: userId,
-        _id: { $ne: req.user._id }
+        _id: userId
       },
       {
-        $set: { 
+        $set: {
           isActive: status
         }
       },
-      { 
+      {
         new: true,
-        runValidators: true 
+        runValidators: true
       }
     );
 
@@ -331,7 +525,7 @@ export const toggleUserStatus = async (req, res, next) => {
     });
 
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -343,12 +537,10 @@ export const updateUserByAdmin = async (req, res, next) => {
     const restrictedFields = [
       'password',
       'trxPassword',
-      'refreshToken',
-      'secretToken',
-      'userIdentity'
+      'refreshToken'
     ];
 
-    const invalidUpdates = Object.keys(updates).filter(update => 
+    const invalidUpdates = Object.keys(updates).filter(update =>
       restrictedFields.includes(update)
     );
 
@@ -361,11 +553,10 @@ export const updateUserByAdmin = async (req, res, next) => {
 
     const user = await User.findByIdAndUpdate(
       new mongoose.Types.ObjectId(userId),
-      updates,
-      { 
+      { ...updates, payInApi: new mongoose.Types.ObjectId(updates.payInApi), payOutApi: new mongoose.Types.ObjectId(updates.payOutApi), package: new mongoose.Types.ObjectId(updates.package) },
+      {
         new: true,
-        runValidators: true,
-        context: 'query'
+        runValidators: true
       }
     ).select('-password -trxPassword -refreshToken -secretToken');
 
@@ -386,77 +577,255 @@ export const updateUserByAdmin = async (req, res, next) => {
     });
 
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-export const settlementTransfer = async (req, res, next) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+export const bulkSwitchApis = catchAsync(async (req, res, next) => {
+  const { payInApi, payOutApi, applyToAll } = req.body;
 
-  try {
-    const { userId } = req.params;
-    const { amount, trxPassword } = req.body;
+  if (!payInApi && !payOutApi) {
+    return next(new AppError('Please provide at least one API to update', 400));
+  }
 
-    if (!amount || amount <= 0) {
-      await session.abortTransaction();
-      return next(new AppError('Please provide a valid positive amount', 400));
+  const update = {};
+  if (payInApi) update.payInApi = payInApi;
+  if (payOutApi) update.payOutApi = payOutApi;
+
+  const options = {
+    new: true,
+    runValidators: true
+  };
+
+  let result;
+  let message = 'APIs updated for all existing users';
+
+  if (applyToAll) {
+    result = await User.updateMany({}, update, options);
+
+    const userSchema = User.schema;
+    if (payInApi) {
+      userSchema.path('payInApi').default(payInApi);
     }
+    if (payOutApi) {
+      userSchema.path('payOutApi').default(payOutApi);
+    }
+    message = 'APIs updated for all existing users and set as default for new users';
+  } else {
+    result = await User.updateMany({}, update, options);
+  }
 
-    // if (!trxPassword) {
-    //   await session.abortTransaction();
-    //   return next(new AppError('Transaction password is required', 400));
-    // }
+  res.status(200).json({
+    success: true,
+    message
+  });
+});
 
-    const user = await User.findById(userId)
-      .session(session);
+export const switchUserApis = async (req, res, next) => {
+  const { userId } = req.params;
+  const { payInApi, payOutApi } = req.body;
 
+  if (!payInApi && !payOutApi) {
+    return next(new AppError('Please provide at least one API to update', 400));
+  }
+  try {
+
+    const user = await User.findById(userId);
     if (!user) {
-      await session.abortTransaction();
       return next(new AppError('User not found', 404));
     }
 
-    // const isTrxPasswordValid = await user.correctTrxPassword(trxPassword);
-    // if (!isTrxPasswordValid) {
-    //   await session.abortTransaction();
-    //   return next(new AppError('Invalid transaction password', 401));
-    // }
-
-    if (user.eWalletBalance < amount) {
-      await session.abortTransaction();
-      return next(new AppError('Insufficient e-wallet balance', 400));
-    }
+    const update = {};
+    if (payInApi) update.payInApi = payInApi;
+    if (payOutApi) update.payOutApi = payOutApi;
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      {
-        $inc: {
-          eWalletBalance: -amount,
-          upiWalletBalance: amount
-        }
-      },
-      { 
-        new: true,
-        runValidators: true,
-        session 
-      }
+      update,
+      { new: true, runValidators: true }
     ).select('-password -trxPassword -refreshToken');
-
-    await session.commitTransaction();
 
     res.status(200).json({
       success: true,
-      message: 'Settlement transfer successful',
-      newBalances: {
-        eWalletBalance: updatedUser.eWalletBalance,
-        upiWalletBalance: updatedUser.upiWalletBalance
-      }
+      message: 'User APIs updated successfully'
     });
-
   } catch (error) {
-    await session.abortTransaction();
-    next(error);
-  } finally {
-    session.endSession();
+    return next(error);
+  }
+}
+
+export const eWalletToMainWalletSettlement = async (req, res, next) => {
+  try {
+    const { userId, amount } = req.body;
+
+    // Validate input
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid amount' });
+    }
+    // Get user with current balances
+    const user = await User.findById(userId).select('+trxPassword eWalletBalance upiWalletBalance');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Check sufficient balance
+    if (user.eWalletBalance < amount) {
+      return res.status(400).json({ success: false, message: 'Insufficient eWallet balance' });
+    }
+
+    // Start transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Update user balances
+      const beforeEWalletBalance = user.eWalletBalance;
+      const afterEWalletBalance = beforeEWalletBalance - amount;
+      const beforeMainWalletBalance = user.upiWalletBalance;
+      const afterMainWalletBalance = beforeMainWalletBalance + amount;
+
+      user.eWalletBalance = afterEWalletBalance;
+      user.upiWalletBalance = afterMainWalletBalance;
+      await user.save({ session });
+
+      // Create eWallet debit transaction
+      const eWalletTransaction = new EwalletTransaction({
+        userId,
+        amount,
+        type: 'debit',
+        description: `Settlement to Main-Wallet`,
+        beforeAmount: beforeEWalletBalance,
+        afterAmount: afterEWalletBalance,
+        status: 'success'
+      });
+      await eWalletTransaction.save({ session });
+
+      // Create main wallet credit transaction
+      const mainWalletTransaction = new MainWalletTransaction({
+        userId,
+        amount,
+        type: 'credit',
+        totalAmount:amount,
+        description: `Amount credit from settlement from E-Wallet`,
+        beforeAmount: beforeMainWalletBalance,
+        afterAmount: afterMainWalletBalance,
+        status: 'success'
+      });
+      await mainWalletTransaction.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Funds transferred successfully'
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  } catch (error) {
+    return next(error)
+  }
+};
+
+export const bankSettlement = async (req, res) => {
+  try {
+    const {
+      userId,
+      amount,
+      gatewayCharge,
+      accountHolderName,
+      utr,
+      accountNumber,
+      ifscCode,
+      bankName,
+      upiId,
+      mobileNumber
+    } = req.body;
+
+    // Validate input
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid amount' });
+    }
+
+    if (!accountHolderName || !accountNumber || !ifscCode) {
+      return res.status(400).json({ success: false, message: 'Bank details are incomplete' });
+    }
+
+    const user = await User.findById(userId).select('+trxPassword eWalletBalance upiWalletBalance');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    const totalDeduction = amount + gatewayCharge;
+
+    if (user.eWalletBalance < totalDeduction) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Insufficient wallet balance. Need ${totalDeduction}, available ${user.eWalletBalance}` 
+      });
+    }
+
+    // Start transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Update user balance
+      const beforeMainWalletBalance = user.eWalletBalance;
+      const afterMainWalletBalance = beforeMainWalletBalance - totalDeduction;
+      user.eWalletBalance = afterMainWalletBalance;
+      await user.save({ session });
+
+      // Create main wallet debit transaction
+      const WalletTransaction = new EwalletTransaction({
+        userId: user._id,
+        amount: amount,
+        charges: gatewayCharge,
+        type: 'debit',
+        description: `Bank transfer to ${accountHolderName} (${accountNumber.slice(-4)})`,
+        beforeAmount: beforeMainWalletBalance,
+        afterAmount: afterMainWalletBalance,
+        status: 'success' // Will update to success when bank confirms
+      });
+      await WalletTransaction.save({ session });
+
+      const trxId = `BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+      // Create payout report record
+      const payoutReport = new payoutRecordModel({
+        user_id: user._id,
+        mobileNumber: mobileNumber || user.mobileNumber,
+        accountHolderName,
+        accountNumber,
+        ifscCode,
+        utr,
+        bankName: bankName || 'N/A',
+        upiId: upiId || '',
+        amount,
+        gatewayCharge,
+        trxId,
+        gateWayId: 'Settlement',
+        status: 'Success',
+        failureReason: ''
+      });
+      await payoutReport.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Bank transfer initiated successfully'
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  } catch (error) {
+    console.error('Error in bank settlement:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };

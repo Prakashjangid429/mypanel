@@ -13,7 +13,7 @@ export const upsertUserMeta = async (req, res, next) => {
 
     res.status(200).json({ success: true, data: updated });
   } catch (error) {
-    next(error);
+      return next(error);
   }
 };
 
@@ -26,7 +26,7 @@ export const getUserMeta = async (req, res, next) => {
 
     res.status(200).json({ success: true, data });
   } catch (error) {
-    next(error);
+      return next(error);
   }
 };
 
@@ -39,7 +39,7 @@ export const getMetaByUserId = async (req, res, next) => {
 
     res.status(200).json({ success: true, data });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -62,7 +62,7 @@ export const updateWhitelistedIPs = async (req, res, next) => {
 
     res.status(200).json({ success: true, data: updated });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -77,6 +77,6 @@ export const deleteUserMeta = async (req, res, next) => {
 
     res.status(200).json({ success: true, message: 'User meta deleted' });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

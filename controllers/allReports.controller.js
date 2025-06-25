@@ -1,6 +1,7 @@
 import PayInReport from "../models/payin.model.js";
 import PayinGenerationRecord from "../models/payinRequests.model.js";
-import PayoutReport from "../models/payout.model.js";
+import PayoutSucess from "../models/payout.model.js";
+import PayoutReport from "../models/payoutRecord.model.js"
 import EwalletTransaction from "../models/ewallet.model.js";
 import MainWalletTransaction from "../models/mainWallet.model.js";
 
@@ -26,14 +27,23 @@ export const getPayinRecords = async (req, res) => {
 
         const pipeline = [];
 
+        // Step 1: Match Filters
         const matchStage = {};
 
         if (status) matchStage.status = status;
-        if (user_id) matchStage.user_id = new mongoose.Types.ObjectId(user_id);
-        if (fromDate && toDate) {
+        if (req?.user?.role === "Admin") {
+            if (user_id) matchStage.user_id = new mongoose.Types.ObjectId(user_id);
+        } else {
+            matchStage.user_id = new mongoose.Types.ObjectId(req.user?._id);
+        }
+
+        // Default toDate to now if not provided
+        const toDateTime = toDate ? new Date(toDate) : new Date();
+
+        if (fromDate) {
             matchStage.createdAt = {
                 $gte: new Date(fromDate),
-                $lte: new Date(toDate)
+                $lte: toDateTime
             };
         }
 
@@ -67,9 +77,23 @@ export const getPayinRecords = async (req, res) => {
         }
 
         pipeline.push({
+            $lookup: {
+                from: "users", // MongoDB collection name of User model
+                localField: "user_id",
+                foreignField: "_id",
+                as: "user"
+            }
+        });
+
+        pipeline.push({
+            $unwind: "$user"
+        });
+
+        pipeline.push({
             $project: {
                 _id: 0,
-                user_id: 1,
+                // user_id: 1,
+                username: "$user.userName", // Include username
                 txnId: 1,
                 refId: 1,
                 gateWayId: 1,
@@ -90,19 +114,22 @@ export const getPayinRecords = async (req, res) => {
         });
 
         if (exportCsv === "true") {
-            const csvData = await PayinGenerationRecord.aggregate(pipeline);
+            const csvPipeline = [...pipeline].filter(stage =>
+                !["$skip", "$limit", "$sort"].includes(Object.keys(stage)[0])
+            );
+
+            const csvData = await PayinGenerationRecord.aggregate(csvPipeline);
 
             const formattedData = csvData.map(record => ({
                 ...record,
                 createdAt: moment(record.createdAt).format("YYYY-MM-DD HH:mm:ss"),
-                requestedAt: moment(record.requestedAt).format("YYYY-MM-DD HH:mm:ss"),
-                updatedAt: moment(record.updatedAt).format("YYYY-MM-DD HH:mm:ss")
+                updatedAt: moment(record.updatedAt).format("YYYY-MM-DD HH:mm:ss"),
             }));
 
-            const csv = await json2csv.json2csvAsync(formattedData);
+            const csv = json2csv.json2csv(formattedData);
 
             res.header("Content-Type", "text/csv");
-            res.header("Content-Disposition", "attachment; filename=payin_records.csv");
+            res.header("Content-Disposition", `attachment; filename=payin_export_${moment().format("YYYYMMDD_HHmmss")}.csv`);
             return res.send(csv);
         }
 
@@ -165,7 +192,11 @@ export const getPayInSuccess = async (req, res) => {
         // Step 1: Match filters
         const matchStage = {};
 
-        if (user_id) matchStage.user_id = mongoose.Types.ObjectId(user_id);
+        if (req?.user?.role === "Admin") {
+            if (user_id) matchStage.user_id = new mongoose.Types.ObjectId(user_id);
+        } else {
+            matchStage.user_id = new mongoose.Types.ObjectId(req.user?._id);
+        }
         if (status) matchStage.isSuccess = status;
 
         if (fromDate && toDate) {
@@ -234,7 +265,7 @@ export const getPayInSuccess = async (req, res) => {
                 updatedAt: moment(record.updatedAt).format("YYYY-MM-DD HH:mm:ss")
             }));
 
-            const csv = await json2csv.json2csvAsync(formattedData);
+            const csv = await json2csv.json2csv(formattedData);
 
             res.header("Content-Type", "text/csv");
             res.header("Content-Disposition", "attachment; filename=payin_reports.csv");
@@ -302,7 +333,11 @@ export const getPayoutReports = async (req, res) => {
         // Step 1: Match Filters
         const matchStage = {};
 
-        if (user_id) matchStage.user_id = mongoose.Types.ObjectId(user_id);
+        if (req?.user?.role === "Admin") {
+            if (user_id) matchStage.user_id = new mongoose.Types.ObjectId(user_id);
+        } else {
+            matchStage.user_id = new mongoose.Types.ObjectId(req.user?._id);
+        }
         if (status) matchStage.status = status;
 
         if (fromDate && toDate) {
@@ -341,11 +376,27 @@ export const getPayoutReports = async (req, res) => {
             });
         }
 
-        // Step 3: Project only necessary fields
+        // Step 3: Lookup user information
+        pipeline.push({
+            $lookup: {
+                from: "users",
+                localField: "user_id",
+                foreignField: "_id",
+                as: "user"
+            }
+        }, {
+            $unwind: {
+                path: "$user",
+                preserveNullAndEmptyArrays: true
+            }
+        });
+
+        // Step 4: Project fields including username
         pipeline.push({
             $project: {
                 _id: 0,
                 user_id: 1,
+                userName: "$user.userName", // Add username from user lookup
                 mobileNumber: 1,
                 accountHolderName: 1,
                 accountNumber: 1,
@@ -359,31 +410,72 @@ export const getPayoutReports = async (req, res) => {
                 trxId: 1,
                 gateWayId: 1,
                 status: 1,
-                ipAddress: 1,
                 failureReason: 1,
                 createdAt: 1,
                 updatedAt: 1
             }
         });
 
-        // Step 4: CSV Export
+        // Step 5: CSV Export
         if (exportCsv === "true") {
             const csvData = await PayoutReport.aggregate(pipeline);
 
             const formattedData = csvData.map(record => ({
-                ...record,
-                createdAt: moment(record.createdAt).format("YYYY-MM-DD HH:mm:ss"),
-                updatedAt: moment(record.updatedAt).format("YYYY-MM-DD HH:mm:ss")
+                "Transaction ID": record.trxId || "N/A",
+                "Username": record.userName || "N/A", // Include username in CSV
+                "Mobile Number": record.mobileNumber || "N/A",
+                "Account Holder": record.accountHolderName || "N/A",
+                "Account Number": `${record.accountNumber}` || "N/A",
+                "UTR": record.utr || "N/A",
+                "IFSC Code": record.ifscCode || "N/A",
+                "Bank Name": record.bankName || "N/A",
+                "UPI ID": record.upiId || "N/A",
+                "Amount": `₹${(record.amount || 0).toFixed(2)}`,
+                "Gateway Charge": `₹${(record.gatewayCharge || 0).toFixed(2)}`,
+                "Net Amount": `₹${(record.afterChargeAmount || 0).toFixed(2)}`,
+                "Gateway ID": record.gateWayId || "N/A",
+                "Status": record.status ? record.status.toUpperCase() : "N/A",
+                "Failure Reason": record.failureReason || "N/A",
+                "Created At": moment(record.createdAt).format("DD-MM-YYYY HH:mm:ss"),
+                "Updated At": moment(record.updatedAt).format("DD-MM-YYYY HH:mm:ss")
             }));
 
-            const csv = await json2csv.json2csvAsync(formattedData);
+            // Define explicit field order for CSV
+            const fields = [
+                "Transaction ID",
+                "Username",
+                "Mobile Number",
+                "Account Holder",
+                "Account Number",
+                "IFSC Code",
+                "Bank Name",
+                "UPI ID",
+                "Amount",
+                "Gateway Charge",
+                "Net Amount",
+                "Gateway ID",
+                "UTR",
+                "Status",
+                "Failure Reason",
+                "Created At",
+                "Updated At"
+            ];
+
+            const csvOptions = {
+                fields,
+                excelStrings: true,
+                withBOM: true,
+                delimiter: ","
+            };
+
+            const csv = json2csv.json2csv(formattedData, csvOptions);
 
             res.header("Content-Type", "text/csv");
-            res.header("Content-Disposition", "attachment; filename=payout_reports.csv");
+            res.header("Content-Disposition", `attachment; filename=payout_reports_${moment().format('YYYYMMDD_HHmmss')}.csv`);
             return res.send(csv);
         }
 
-        // Step 5: Sort & Paginate
+        // Step 6: Sort & Paginate
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
             { $skip: (parseInt(page) - 1) * parseInt(limit) },
@@ -392,7 +484,7 @@ export const getPayoutReports = async (req, res) => {
 
         const results = await PayoutReport.aggregate(pipeline);
 
-        // Step 6: Count total documents
+        // Step 7: Count total documents
         const countPipeline = [...pipeline].filter(stage =>
             !["$skip", "$limit", "$sort"].includes(Object.keys(stage)[0])
         );
@@ -510,8 +602,11 @@ export const getPayOutSuccess = async (req, res) => {
 
         // Step 1: Match Filters
         const matchStage = {};
-
-        if (user_id) matchStage.user_id = mongoose.Types.ObjectId(user_id);
+        if (req?.user?.role === "Admin") {
+            if (user_id) matchStage.user_id = new mongoose.Types.ObjectId(user_id);
+        } else {
+            matchStage.user_id = new mongoose.Types.ObjectId(req.user?._id);
+        }
         if (status) matchStage.isSuccess = status;
 
         if (fromDate && toDate) {
@@ -711,8 +806,11 @@ export const getEwalletTransactions = async (req, res) => {
 
         // Step 1: Match Filters
         const matchStage = {};
-
-        if (userId) matchStage.userId = mongoose.Types.ObjectId(userId);
+        if (req?.user?.role === "Admin") {
+            if (userId) matchStage.userId = new mongoose.Types.ObjectId(userId);
+        } else {
+            matchStage.userId = new mongoose.Types.ObjectId(req.user?._id);
+        }
         if (type) matchStage.type = type;
         if (status) matchStage.status = status;
 
@@ -737,16 +835,32 @@ export const getEwalletTransactions = async (req, res) => {
             pipeline.push({ $match: matchStage });
         }
 
-        // Step 2: Project only necessary fields
+        // Step 2: Lookup to get User details
+        pipeline.push({
+            $lookup: {
+                from: "users", // MongoDB collection name of User model
+                localField: "userId",
+                foreignField: "_id",
+                as: "user"
+            }
+        });
+
+        // Step 3: Unwind the user array
+        pipeline.push({
+            $unwind: "$user"
+        });
+
+        // Step 4: Project only necessary fields including username
         pipeline.push({
             $project: {
                 _id: 0,
                 userId: 1,
+                userName: "$user.userName", // Include username
                 amount: 1,
                 charges: 1,
-                totalAmount: 1,
                 type: 1,
                 description: 1,
+                beforeAmount: 1,
                 afterAmount: 1,
                 status: 1,
                 createdAt: 1,
@@ -754,24 +868,32 @@ export const getEwalletTransactions = async (req, res) => {
             }
         });
 
-        // Step 3: CSV Export
+        // Step 5: CSV Export
         if (exportCsv === "true") {
             const csvData = await EwalletTransaction.aggregate(pipeline);
 
             const formattedData = csvData.map(record => ({
-                ...record,
+                userName: record.userName,
+                amount: record.amount,
+                charges: record.charges,
+                totalAmount: record.charges + record.amount,
+                type: record.type,
+                description: record.description.replace(/,/g, '') || '', // Remove commas to avoid CSV break
+                beforeAmount: record.beforeAmount,
+                afterAmount: record.afterAmount,
+                status: record.status,
                 createdAt: moment(record.createdAt).format("YYYY-MM-DD HH:mm:ss"),
                 updatedAt: moment(record.updatedAt).format("YYYY-MM-DD HH:mm:ss")
             }));
 
-            const csv = await json2csv.json2csvAsync(formattedData);
+            const csv = await json2csv.json2csv(formattedData);
 
             res.header("Content-Type", "text/csv");
             res.header("Content-Disposition", "attachment; filename=ewallet_transactions.csv");
             return res.send(csv);
         }
 
-        // Step 4: Sort & Paginate
+        // Step 6: Sort & Paginate
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
             { $skip: (parseInt(page) - 1) * parseInt(limit) },
@@ -780,7 +902,7 @@ export const getEwalletTransactions = async (req, res) => {
 
         const results = await EwalletTransaction.aggregate(pipeline);
 
-        // Step 5: Count total documents
+        // Step 7: Count total documents
         const countPipeline = [...pipeline].filter(stage =>
             !["$skip", "$limit", "$sort"].includes(Object.keys(stage)[0])
         );
@@ -895,7 +1017,7 @@ export const getMainWalletTransactions = async (req, res) => {
             fromDate,
             toDate,
             type,
-            status,
+            status = 'success',
             minAmount,
             maxAmount,
             search = "",
@@ -906,7 +1028,12 @@ export const getMainWalletTransactions = async (req, res) => {
         // Step 1: Match Filters
         const matchStage = {};
 
-        if (userId) matchStage.userId = mongoose.Types.ObjectId(userId);
+        if (req?.user?.role === "Admin") {
+            if (userId) matchStage.userId = new mongoose.Types.ObjectId(userId);
+        } else {
+            matchStage.userId = new mongoose.Types.ObjectId(req.user?._id);
+        }
+
         if (type) matchStage.type = type;
         if (status) matchStage.status = status;
 
@@ -931,16 +1058,33 @@ export const getMainWalletTransactions = async (req, res) => {
             pipeline.push({ $match: matchStage });
         }
 
-        // Step 2: Project only necessary fields
+        // Step 2: Lookup to get User details
+        pipeline.push({
+            $lookup: {
+                from: "users", // Collection name of User model
+                localField: "userId",
+                foreignField: "_id",
+                as: "user"
+            }
+        });
+
+        // Unwind to flatten the user array
+        pipeline.push({
+            $unwind: "$user"
+        });
+
+        // Step 3: Project only necessary fields including username
         pipeline.push({
             $project: {
                 _id: 0,
                 userId: 1,
+                userName: "$user.userName", // Include username
                 amount: 1,
                 charges: 1,
                 totalAmount: 1,
                 type: 1,
                 description: 1,
+                beforeAmount: 1,
                 afterAmount: 1,
                 status: 1,
                 createdAt: 1,
@@ -948,24 +1092,32 @@ export const getMainWalletTransactions = async (req, res) => {
             }
         });
 
-        // Step 3: CSV Export
+        // Step 4: CSV Export
         if (exportCsv === "true") {
             const csvData = await MainWalletTransaction.aggregate(pipeline);
 
             const formattedData = csvData.map(record => ({
-                ...record,
+                userName: record.userName,
+                amount: record.amount,
+                charges: record.charges,
+                totalAmount: record.totalAmount,
+                type: record.type,
+                description: record.description.replace(/,/g, '') || '', // Remove commas to avoid CSV break
+                beforeAmount: record.beforeAmount,
+                afterAmount: record.afterAmount,
+                status: record.status,
                 createdAt: moment(record.createdAt).format("YYYY-MM-DD HH:mm:ss"),
                 updatedAt: moment(record.updatedAt).format("YYYY-MM-DD HH:mm:ss")
             }));
 
-            const csv = await json2csv.json2csvAsync(formattedData);
+            const csv = await json2csv.json2csv(formattedData);
 
             res.header("Content-Type", "text/csv");
             res.header("Content-Disposition", "attachment; filename=main_wallet_transactions.csv");
             return res.send(csv);
         }
 
-        // Step 4: Sort & Paginate
+        // Step 5: Sort & Paginate
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
             { $skip: (parseInt(page) - 1) * parseInt(limit) },
@@ -974,7 +1126,7 @@ export const getMainWalletTransactions = async (req, res) => {
 
         const results = await MainWalletTransaction.aggregate(pipeline);
 
-        // Step 5: Count total documents
+        // Step 6: Count total documents
         const countPipeline = [...pipeline].filter(stage =>
             !["$skip", "$limit", "$sort"].includes(Object.keys(stage)[0])
         );
@@ -1075,3 +1227,115 @@ export const getMainWalletStats = async (req, res) => {
         });
     }
 };
+
+async function createSampleTransactions(userId) {
+    try {
+        // Ensure userId is a valid ObjectId
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            throw new Error('Invalid userId');
+        }
+
+        const transactions = [];
+
+        let currentBalance = Math.floor(Math.random() * 5000); // Random starting balance
+
+        for (let i = 0; i < 50; i++) {
+            // Random amount between 10 and 500
+            const amount = Math.floor(Math.random() * 491) + 10;
+            const charges = Math.random() < 0.3 ? Math.floor(Math.random() * 10) : 0; // Sometimes there are charges
+
+            // Randomly choose credit or debit
+            const type = 'debit';
+
+            const beforeAmount = currentBalance;
+
+            let totalAmount, afterAmount;
+
+            if (type === 'credit') {
+                totalAmount = amount + charges;
+                afterAmount = beforeAmount + amount;
+            } else {
+                totalAmount = amount;
+                afterAmount = beforeAmount - amount;
+            }
+
+            transactions.push({
+                userId,
+                amount,
+                charges,
+                totalAmount,
+                type,
+                description: `${type === 'credit' ? 'Added funds' : 'Deducted funds'} - Txn #${i + 1}`,
+                beforeAmount,
+                afterAmount,
+                status: 'success',
+            });
+
+            // Update current balance for next transaction
+            currentBalance = afterAmount;
+        }
+
+        // Insert all transactions
+        await MainWalletTransaction.insertMany(transactions);
+
+        console.log(`✅ Successfully inserted 50 transactions for userId: ${userId}`);
+    } catch (error) {
+        console.error('❌ Error creating transactions:', error.message);
+    }
+}
+
+// seedPayoutReports('6836f0bb59332eedd863c35a')
+
+async function seedPayoutReports(userId) {
+    try {
+        // Validate userId
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+            throw new Error('Valid userId is required');
+        }
+
+        const payouts = [];
+
+        // Sample static data
+        const statusOptions = ['Pending', 'Failed', 'Success'];
+        const accountHolders = [
+            'John Doe', 'Jane Smith', 'Alice Johnson', 'Bob Williams',
+            'Charlie Brown', 'Emily Davis', 'Michael Wilson', 'Sarah Miller'
+        ];
+        const banks = ['SBI', 'HDFC', 'ICICI', 'Axis Bank', 'Kotak Mahindra', 'PNB'];
+        const failureReasons = [
+            'Insufficient balance', 'Invalid account details', 'Bank server error',
+            'Transaction timed out', 'User cancelled transaction'
+        ];
+
+        for (let i = 0; i < 50; i++) {
+            const amount = Number((Math.random() * 4900 + 100).toFixed(2)); // Between 100 and 5000
+            const gatewayCharge = Number((amount * 0.01).toFixed(2)); // 1% charge
+            const status = statusOptions[Math.floor(Math.random() * statusOptions.length)];
+
+            const baseTrxId = `TXN${String(i + 1000).slice(-4)}`;
+            const trxId = `${baseTrxId}${Math.floor(Math.random() * 10000)}`;
+
+            payouts.push({
+                user_id: new mongoose.Types.ObjectId(userId),
+                mobileNumber: `98${Math.floor(10000000 + Math.random() * 90000000)}`, // 10-digit number
+                accountHolderName: accountHolders[Math.floor(Math.random() * accountHolders.length)],
+                accountNumber: `100000${Math.floor(100000 + Math.random() * 900000)}`,
+                utr: status === 'Success' ? `UTR${Math.floor(10000000 + Math.random() * 90000000)}` : undefined,
+                ifscCode: `HDFC000${Math.floor(1000 + Math.random() * 9000)}`,
+                bankName: banks[Math.floor(Math.random() * banks.length)],
+                upiId: status === 'Success' ? `user${Math.floor(Math.random() * 1000)}@upi` : undefined,
+                amount,
+                gatewayCharge,
+                trxId,
+                gateWayId: `GW${Math.floor(Math.random() * 100)}`,
+                status,
+                failureReason: status === 'Failed' ? failureReasons[Math.floor(Math.random() * failureReasons.length)] : undefined
+            });
+        }
+
+        await PayoutReport.insertMany(payouts);
+        console.log(`✅ Successfully inserted 50 payout reports for user ID: ${userId}`);
+    } catch (error) {
+        console.error(`❌ Error seeding payout reports: ${error.message}`);
+    }
+}
