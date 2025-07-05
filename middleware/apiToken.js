@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/user.model.js';
 import userMeta from '../models/userMeta.model.js';
+import requestIp from "request-ip";
+
 
 export const verifyToken = async (req, res, next) => {
   try {
@@ -26,7 +28,7 @@ export const verifyToken = async (req, res, next) => {
     }
 
     const clientId = decodedToken?.clientId;
-    if (!clientId) {
+    if (!clientId && !decodedToken.userName) {
       return res.status(401).json({
         status: 'Failed',
         status_code: 401,
@@ -34,7 +36,7 @@ export const verifyToken = async (req, res, next) => {
       });
     }
 
-    const [user, userExtra] = await Promise.all([User.findOne({ clientId, isActive: true }, "-address -bankDetails -createdAt -updatedAt -__v")
+    const [user, userExtra] = await Promise.all([User.findOne({ userName: decodedToken.userName, clientId, isActive: true }, "-address -bankDetails -createdAt -updatedAt -__v")
       .populate([
         { path: 'payInApi', select: '-meta -createdAt -updatedAt -__v' },
         { path: 'package', select: '-createdAt -updatedAt -__v' }
@@ -50,15 +52,14 @@ export const verifyToken = async (req, res, next) => {
     }
 
     if (!userExtra || userExtra?.whitelistedIPs && userExtra?.whitelistedIPs?.length > 0) {
-      const clientIP = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress;
-      const cleanIP = clientIP.replace(/^.*:/, ''); // Handle IPv6 format if needed
+      const clientIP = requestIp.getClientIp(req);
 
-      if (!userExtra?.whitelistedIPs.includes(cleanIP)) {
+      if (!userExtra?.whitelistedIPs.includes(clientIP)) {
         return res.status(403).json({
           status: 'Failed',
-          status_code: 403,
-          message: `Access denied - IP not whitelisted ${cleanIP}`,
-        });
+          status_code: 403, 
+          message: `Access denied - IP not whitelisted ${clientIP}`,
+        }); 
       }
     }
 
