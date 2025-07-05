@@ -45,7 +45,7 @@ export default (err, req, res, next) => {
   //     statusCode: 400,
   //     message: 'Validation error',
   //     errors: validationErrors,
-  //   });
+  //   }); 
   // }
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';

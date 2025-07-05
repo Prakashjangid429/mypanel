@@ -86,7 +86,7 @@ export const getPayinRecords = async (req, res) => {
         });
 
         pipeline.push({
-            $unwind: "$user",preserveNullAndEmptyArrays:true
+            $unwind: "$user"
         });
 
         pipeline.push({
@@ -96,7 +96,6 @@ export const getPayinRecords = async (req, res) => {
                 username: "$user.userName", // Include username
                 txnId: 1,
                 refId: 1,
-                gateWayId: 1,
                 amount: 1,
                 chargeAmount: 1,
                 utr: 1,
@@ -107,7 +106,6 @@ export const getPayinRecords = async (req, res) => {
                 qrIntent: 1,
                 status: 1,
                 requestedAt: 1,
-                failureReason: 1,
                 createdAt: 1,
                 updatedAt: 1
             }
@@ -133,13 +131,30 @@ export const getPayinRecords = async (req, res) => {
             return res.send(csv);
         }
 
+        let statsPipeline = [...pipeline, {
+            $group: {
+                _id: null,
+                totalTransactions: { $sum: 1 },
+                totalAmount: { $sum: "$amount" },
+                totalCharges: { $sum: "$chargeAmount" },
+                totalNetAmount: { $sum: { $subtract: ["$amount", "$chargeAmount"] } },
+                avgAmount: { $avg: "$amount" },
+                successCount: { $sum: { $cond: [{ $eq: ["$status", "Success"] }, 1, 0] } },
+                failCount: { $sum: { $cond: [{ $eq: ["$status", "Failed"] }, 1, 0] } },
+                pendingCount: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } }
+            }
+        }]
+
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
             { $skip: (parseInt(page) - 1) * parseInt(limit) },
             { $limit: parseInt(limit) }
         );
 
-        const results = await PayinGenerationRecord.aggregate(pipeline);
+        const [results, stats] = await Promise.all([
+            PayinGenerationRecord.aggregate(pipeline),
+            PayinGenerationRecord.aggregate(statsPipeline)
+        ]);
 
         const countPipeline = [...pipeline].filter(stage =>
             !["$skip", "$limit", "$sort"].includes(Object.keys(stage)[0])
@@ -157,7 +172,8 @@ export const getPayinRecords = async (req, res) => {
                 page: parseInt(page),
                 pages: Math.ceil(total / limit),
                 limit: parseInt(limit)
-            }
+            },
+            stats: stats[0]
         });
 
     } catch (error) {
@@ -395,7 +411,7 @@ export const getPayoutReports = async (req, res) => {
         pipeline.push({
             $project: {
                 _id: 0,
-                user_id: 1,
+                // user_id: 1,
                 userName: "$user.userName", // Add username from user lookup
                 mobileNumber: 1,
                 accountHolderName: 1,
@@ -408,9 +424,7 @@ export const getPayoutReports = async (req, res) => {
                 gatewayCharge: 1,
                 afterChargeAmount: 1,
                 trxId: 1,
-                gateWayId: 1,
                 status: 1,
-                failureReason: 1,
                 createdAt: 1,
                 updatedAt: 1
             }
@@ -474,7 +488,19 @@ export const getPayoutReports = async (req, res) => {
             res.header("Content-Disposition", `attachment; filename=payout_reports_${moment().format('YYYYMMDD_HHmmss')}.csv`);
             return res.send(csv);
         }
-
+        let statsPipeline = [...pipeline, {
+            $group: {
+                _id: null,
+                totalTransactions: { $sum: 1 },
+                totalAmount: { $sum: "$amount" },
+                totalCharges: { $sum: "$gatewayCharge" },
+                totalNetAmount: { $sum: { $sum: ["$amount", "$gatewayCharge"] } },
+                avgAmount: { $avg: "$amount" },
+                successCount: { $sum: { $cond: [{ $eq: ["$status", "Success"] }, 1, 0] } },
+                failCount: { $sum: { $cond: [{ $eq: ["$status", "Failed"] }, 1, 0] } },
+                pendingCount: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } }
+            }
+        }]
         // Step 6: Sort & Paginate
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
@@ -482,7 +508,10 @@ export const getPayoutReports = async (req, res) => {
             { $limit: parseInt(limit) }
         );
 
-        const results = await PayoutReport.aggregate(pipeline);
+        const [results,stats] = await Promise.all([
+            PayoutReport.aggregate(pipeline),
+            PayoutReport.aggregate(statsPipeline)
+        ]);
 
         // Step 7: Count total documents
         const countPipeline = [...pipeline].filter(stage =>
@@ -501,7 +530,8 @@ export const getPayoutReports = async (req, res) => {
                 page: parseInt(page),
                 pages: Math.ceil(total / limit),
                 limit: parseInt(limit)
-            }
+            },
+            stats: stats[0]
         });
 
     } catch (error) {
@@ -892,7 +922,18 @@ export const getEwalletTransactions = async (req, res) => {
             res.header("Content-Disposition", "attachment; filename=ewallet_transactions.csv");
             return res.send(csv);
         }
-
+        let statsPipeline = [...pipeline, {
+            $group: {
+                _id: null,
+                totalTransactions: { $sum: 1 },
+                totalAmount: { $sum: "$amount" },
+                totalCharges: { $sum: "$charges" },
+                totalNetAmount: { $sum: { $subtract: ["$amount", "$charges"] } },
+                avgAmount: { $avg: "$amount" },
+                depositCount: { $sum: { $cond: [{ $eq: ["$type", "credit"] }, 1, 0] } },
+                withdrawalCount: { $sum: { $cond: [{ $eq: ["$type", "debit"] }, 1, 0] } }
+            }
+        }]
         // Step 6: Sort & Paginate
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
@@ -900,7 +941,10 @@ export const getEwalletTransactions = async (req, res) => {
             { $limit: parseInt(limit) }
         );
 
-        const results = await EwalletTransaction.aggregate(pipeline);
+        const [results, stats] = await Promise.all([
+            EwalletTransaction.aggregate(pipeline),
+            EwalletTransaction.aggregate(statsPipeline)
+        ]);
 
         // Step 7: Count total documents
         const countPipeline = [...pipeline].filter(stage =>
@@ -919,7 +963,8 @@ export const getEwalletTransactions = async (req, res) => {
                 page: parseInt(page),
                 pages: Math.ceil(total / limit),
                 limit: parseInt(limit)
-            }
+            },
+            stats: stats[0]
         });
 
     } catch (error) {
@@ -927,79 +972,6 @@ export const getEwalletTransactions = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Server error while fetching eWallet transactions."
-        });
-    }
-};
-
-export const getEwalletStats = async (req, res) => {
-    try {
-        const { query } = req;
-        const { fromDate, toDate } = query;
-
-        const pipeline = [];
-
-        // Match date range
-        if (fromDate && toDate) {
-            pipeline.push({
-                $match: {
-                    createdAt: {
-                        $gte: new Date(fromDate),
-                        $lte: new Date(toDate)
-                    }
-                }
-            });
-        }
-
-        // Group by type and calculate totals
-        pipeline.push({
-            $group: {
-                _id: "$type",
-                count: { $sum: 1 },
-                totalAmount: { $sum: "$amount" },
-                totalCharges: { $sum: "$charges" },
-                totalAfterAmount: { $sum: "$afterAmount" }
-            }
-        });
-
-        const result = await EwalletTransaction.aggregate(pipeline);
-
-        const stats = {
-            totalTransactions: 0,
-            totalCredit: 0,
-            totalDebit: 0,
-            totalCharges: 0,
-            netBalance: 0,
-            breakdown: {}
-        };
-
-        result.forEach(stat => {
-            stats.breakdown[stat._id] = {
-                count: stat.count,
-                totalAmount: stat.totalAmount,
-                totalCharges: stat.totalCharges,
-                totalAfterAmount: stat.totalAfterAmount
-            };
-            stats.totalTransactions += stat.count;
-            if (stat._id === "credit") {
-                stats.totalCredit += stat.totalAfterAmount;
-            } else if (stat._id === "debit") {
-                stats.totalDebit += stat.totalAfterAmount;
-            }
-            stats.totalCharges += stat.totalCharges;
-        });
-
-        stats.netBalance = stats.totalCredit - stats.totalDebit;
-
-        return res.json({
-            success: true,
-            data: stats
-        });
-
-    } catch (error) {
-        console.error("[ERROR] Failed to fetch eWallet stats:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error while fetching eWallet stats."
         });
     }
 };
@@ -1117,6 +1089,18 @@ export const getMainWalletTransactions = async (req, res) => {
             return res.send(csv);
         }
 
+        let statsPipeline = [...pipeline, {
+            $group: {
+                _id: null,
+                totalTransactions: { $sum: 1 },
+                totalAmount: { $sum: "$amount" },
+                totalCharges: { $sum: "$charges" },
+                totalNetAmount: { $sum:{ $sum:["$amount", "$charges"] }},
+                avgAmount: { $avg: "$totalAmount" },
+                depositCount: { $sum: { $cond: [{ $eq: ["$type", "credit"] }, 1, 0] } },
+                withdrawalCount: { $sum: { $cond: [{ $eq: ["$type", "debit"] }, 1, 0] } }
+            }
+        }]
         // Step 5: Sort & Paginate
         pipeline.push(
             { $sort: { [sortBy]: parseInt(order) } },
@@ -1124,7 +1108,7 @@ export const getMainWalletTransactions = async (req, res) => {
             { $limit: parseInt(limit) }
         );
 
-        const results = await MainWalletTransaction.aggregate(pipeline);
+        const [results, stats] = await Promise.all([MainWalletTransaction.aggregate(pipeline), MainWalletTransaction.aggregate(statsPipeline)]);
 
         // Step 6: Count total documents
         const countPipeline = [...pipeline].filter(stage =>
@@ -1143,7 +1127,8 @@ export const getMainWalletTransactions = async (req, res) => {
                 page: parseInt(page),
                 pages: Math.ceil(total / limit),
                 limit: parseInt(limit)
-            }
+            },
+            stats: stats[0]
         });
 
     } catch (error) {
@@ -1151,79 +1136,6 @@ export const getMainWalletTransactions = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Server error while fetching main wallet transactions."
-        });
-    }
-};
-
-export const getMainWalletStats = async (req, res) => {
-    try {
-        const { query } = req;
-        const { fromDate, toDate } = query;
-
-        const pipeline = [];
-
-        // Match date range
-        if (fromDate && toDate) {
-            pipeline.push({
-                $match: {
-                    createdAt: {
-                        $gte: new Date(fromDate),
-                        $lte: new Date(toDate)
-                    }
-                }
-            });
-        }
-
-        // Group by type and calculate totals
-        pipeline.push({
-            $group: {
-                _id: "$type",
-                count: { $sum: 1 },
-                totalAmount: { $sum: "$amount" },
-                totalCharges: { $sum: "$charges" },
-                totalAfterAmount: { $sum: "$afterAmount" }
-            }
-        });
-
-        const result = await MainWalletTransaction.aggregate(pipeline);
-
-        const stats = {
-            totalTransactions: 0,
-            totalCredit: 0,
-            totalDebit: 0,
-            totalCharges: 0,
-            netBalance: 0,
-            breakdown: {}
-        };
-
-        result.forEach(stat => {
-            stats.breakdown[stat._id] = {
-                count: stat.count,
-                totalAmount: stat.totalAmount,
-                totalCharges: stat.totalCharges,
-                totalAfterAmount: stat.totalAfterAmount
-            };
-            stats.totalTransactions += stat.count;
-            if (stat._id === "credit") {
-                stats.totalCredit += stat.totalAfterAmount;
-            } else if (stat._id === "debit") {
-                stats.totalDebit += stat.totalAfterAmount;
-            }
-            stats.totalCharges += stat.totalCharges;
-        });
-
-        stats.netBalance = stats.totalCredit - stats.totalDebit;
-
-        return res.json({
-            success: true,
-            data: stats
-        });
-
-    } catch (error) {
-        console.error("[ERROR] Failed to fetch main wallet stats:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error while fetching main wallet stats."
         });
     }
 };
@@ -1237,7 +1149,7 @@ async function createSampleTransactions(userId) {
 
         const transactions = [];
 
-        let currentBalance = Math.floor(Math.random() * 5000); // Random starting balance
+        let currentBalance = 5000; // Random starting balance
 
         for (let i = 0; i < 50; i++) {
             // Random amount between 10 and 500
@@ -1251,13 +1163,9 @@ async function createSampleTransactions(userId) {
 
             let totalAmount, afterAmount;
 
-            if (type === 'credit') {
-                totalAmount = amount + charges;
-                afterAmount = beforeAmount + amount;
-            } else {
-                totalAmount = amount;
-                afterAmount = beforeAmount - amount;
-            }
+
+            totalAmount = amount + charges;
+            afterAmount = beforeAmount - totalAmount;
 
             transactions.push({
                 userId,

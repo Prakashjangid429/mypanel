@@ -526,7 +526,7 @@ export const toggleUserStatus = async (req, res, next) => {
 
   } catch (error) {
     return next(error);
-  }
+  } 
 };
 
 export const updateUserByAdmin = async (req, res, next) => {
@@ -754,7 +754,7 @@ export const bankSettlement = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Bank details are incomplete' });
     }
 
-    const user = await User.findById(userId).select('+trxPassword eWalletBalance upiWalletBalance');
+    const user = await User.findById(new mongoose.Types.ObjectId(userId)).select('+trxPassword eWalletBalance upiWalletBalance');
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -791,7 +791,7 @@ export const bankSettlement = async (req, res) => {
       });
       await WalletTransaction.save({ session });
 
-      const trxId = `BANK-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const trxId = `BANK-${Date.now()}`;
 
       // Create payout report record
       const payoutReport = new payoutRecordModel({
@@ -816,14 +816,14 @@ export const bankSettlement = async (req, res) => {
       session.endSession();
 
       return res.status(200).json({
-        success: true,
+        success: true, 
         message: 'Bank transfer initiated successfully'
       });
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
       throw error;
-    }
+    }  
   } catch (error) {
     console.error('Error in bank settlement:', error);
     return res.status(500).json({ success: false, message: 'Internal server error' });

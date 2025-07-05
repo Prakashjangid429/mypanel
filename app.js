@@ -46,10 +46,10 @@ app.use(compression({ threshold: 1024 }));
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/user-meta', userMetaRoutes);
 app.use('/api/v1/package', logRequest, packageRoutes);
-app.use('/api/v1/payIn',protect, restrictTo('Admin'), payinApisRoutes);
-app.use('/api/v1/payOut',protect, restrictTo('Admin'), payoutApisRoutes);
+app.use('/api/v1/payIn', protect, restrictTo('Admin'), payinApisRoutes);
+app.use('/api/v1/payOut', protect, restrictTo('Admin'), payoutApisRoutes);
 app.use('/api/v1/payment', payinRoutes);
-app.use('/api/v1/report', protect,reportsRoutes)
+app.use('/api/v1/report', protect, reportsRoutes)
 
 app.post('/dummy-gateway', async (req, res) => {
   const { txnId, amount, name, email, mobileNumber } = req.body;
@@ -68,19 +68,17 @@ app.post('/dummy-gateway', async (req, res) => {
     refId: isSuccess ? `REF${txnId}` : null,
   };
 
-  setTimeout(async () => {
-    try {
-      await axios.post(callbackURL, {
-        txnId,
-        status: isSuccess ? "success" : "failed",
-        message: isSuccess ? "Payment completed successfully" : "Payment failed",
-        refId: isSuccess ? `REF${txnId}` : null,
-        utr: isSuccess ? `UTR${txnId}` : null,
-      });
-    } catch (callbackError) {
-      console.error("Callback failed:", callbackError?.response?.data?.message || callbackError.message);
-    }
-  }, delay);
+  try {
+    await axios.post(callbackURL, {
+      txnId,
+      status: isSuccess ? "success" : "failed",
+      message: isSuccess ? "Payment completed successfully" : "Payment failed",
+      refId: isSuccess ? `REF${txnId}` : null,
+      utr: isSuccess ? `UTR${txnId}` : null,
+    });
+  } catch (callbackError) {
+    console.error("Callback failed:", callbackError?.response?.data?.message || callbackError.message);
+  }
 
   res.json(responsePayload);
 });

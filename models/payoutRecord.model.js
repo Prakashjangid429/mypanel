@@ -73,7 +73,6 @@ const payoutReportSchema = new Schema(
   { timestamps: true }
 );
 
-// Indexes for faster queries
 // payoutReportSchema.index({ trxId: 1 }, { unique: true });
 payoutReportSchema.index({ user_id: 1, createdAt: 1 });
 payoutReportSchema.index({ status: 1, createdAt: 1 });

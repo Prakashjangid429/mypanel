@@ -4,9 +4,6 @@ import AppError from '../utils/appError.js';
 export const upsertUserMeta = async (req, res, next) => {
   try {
     const { payInCallbackUrl, payOutCallbackUrl, meta } = req.body;
-
-    console.log({ payInCallbackUrl, payOutCallbackUrl, meta, clientId: req.user.clientId })
-
     const updated = await UserMeta.findOneAndUpdate(
       { userId: req.user._id },
       { payInCallbackUrl, payOutCallbackUrl, meta, clientId: req.user.clientId },

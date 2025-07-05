@@ -257,6 +257,7 @@ export const payinCallback = async (req, res, next) => {
                         const walletTransaction = {
                             userId: paymentRecord.user_id,
                             amount: paymentRecord.amount,
+                            beforeAmount: user.eWalletBalance - netAmount,
                             charges: paymentRecord.chargeAmount,
                             type: 'credit',
                             afterAmount: user.eWalletBalance,

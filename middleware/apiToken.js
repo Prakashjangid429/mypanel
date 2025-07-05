@@ -58,7 +58,7 @@ export const verifyToken = async (req, res, next) => {
         return res.status(403).json({
           status: 'Failed',
           status_code: 403, 
-          message: `Access denied - IP not whitelisted ${clientIP}`,
+          message: `Access denied - IP not whitelisted - ${clientIP}`,
         }); 
       }
     }

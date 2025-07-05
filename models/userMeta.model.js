@@ -21,6 +21,16 @@ const userMetaSchema = new Schema(
       type: String,
       default: null,
     },
+    dailyLimit: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    todayConsume:{
+      type:Number,
+      default: 0,
+      min: 0
+    },
     whitelistedIPs: {
       type: [String],
       default: [],

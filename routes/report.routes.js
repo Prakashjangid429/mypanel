@@ -7,9 +7,7 @@ import {
     getPayOutSuccess,
     getPayOutSuccessStats,
     getEwalletTransactions,
-    getEwalletStats,
-    getMainWalletTransactions,
-    getMainWalletStats
+    getMainWalletTransactions
 } from "../controllers/allReports.controller.js";
 
 const router = express.Router();
@@ -28,10 +26,6 @@ router.get("/payout/success-stats", getPayOutSuccessStats);
 
 router.get("/ewallet/transactions", getEwalletTransactions);
 
-router.get("/ewallet/stats", getEwalletStats);
-
 router.get("/mainwallet/transactions", getMainWalletTransactions);
-
-router.get("/mainwallet/stats", getMainWalletStats);
 
 export default router;

@@ -122,11 +122,6 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: [0, "Balance cannot be negative"]
   }, 
-  dailyLimit: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
   address: {
     country: {
       type: String,

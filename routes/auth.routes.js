@@ -12,7 +12,9 @@ import {
   updateBankDetails,
   flatenUsers,
   switchUserApis,
-  bulkSwitchApis
+  bulkSwitchApis,
+  bankSettlement,
+  eWalletToMainWalletSettlement
 } from '../controllers/auth.controller.js';
 import { protect, restrictTo } from '../middleware/auth.js';
 
@@ -38,8 +40,7 @@ router.post('/:userId', updateUserByAdmin);
 
 router.put('/switch/:userId', switchUserApis);
 router.put('/bulk', bulkSwitchApis);
-
-
-
+router.post('/settlement/bank',bankSettlement)
+router.post("/settlement/wallet",eWalletToMainWalletSettlement)
 
 export default router;
