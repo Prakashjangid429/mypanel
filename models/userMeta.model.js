@@ -8,6 +8,11 @@ const userMetaSchema = new Schema(
       required: true,
       unique: true,
     },
+    clientId: {
+      type: String,
+      required: true,
+      unique: true
+    },
     payInCallbackUrl: {
       type: String,
       default: null,

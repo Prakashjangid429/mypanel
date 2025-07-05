@@ -86,7 +86,7 @@ export const getPayinRecords = async (req, res) => {
         });
 
         pipeline.push({
-            $unwind: "$user"
+            $unwind: "$user",preserveNullAndEmptyArrays:true
         });
 
         pipeline.push({

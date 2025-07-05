@@ -705,7 +705,7 @@ export const eWalletToMainWalletSettlement = async (req, res, next) => {
         userId,
         amount,
         type: 'credit',
-        totalAmount:amount,
+        totalAmount: amount,
         description: `Amount credit from settlement from E-Wallet`,
         beforeAmount: beforeMainWalletBalance,
         afterAmount: afterMainWalletBalance,
@@ -761,9 +761,9 @@ export const bankSettlement = async (req, res) => {
     const totalDeduction = amount + gatewayCharge;
 
     if (user.eWalletBalance < totalDeduction) {
-      return res.status(400).json({ 
-        success: false, 
-        message: `Insufficient wallet balance. Need ${totalDeduction}, available ${user.eWalletBalance}` 
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient wallet balance. Need ${totalDeduction}, available ${user.eWalletBalance}`
       });
     }
 

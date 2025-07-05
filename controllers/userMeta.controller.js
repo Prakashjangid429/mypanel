@@ -5,15 +5,17 @@ export const upsertUserMeta = async (req, res, next) => {
   try {
     const { payInCallbackUrl, payOutCallbackUrl, meta } = req.body;
 
+    console.log({ payInCallbackUrl, payOutCallbackUrl, meta, clientId: req.user.clientId })
+
     const updated = await UserMeta.findOneAndUpdate(
       { userId: req.user._id },
-      { payInCallbackUrl, payOutCallbackUrl, meta },
+      { payInCallbackUrl, payOutCallbackUrl, meta, clientId: req.user.clientId },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
     res.status(200).json({ success: true, data: updated });
   } catch (error) {
-      return next(error);
+    return next(error);
   }
 };
 
@@ -26,7 +28,7 @@ export const getUserMeta = async (req, res, next) => {
 
     res.status(200).json({ success: true, data });
   } catch (error) {
-      return next(error);
+    return next(error);
   }
 };
 
@@ -54,8 +56,8 @@ export const updateWhitelistedIPs = async (req, res, next) => {
 
     const updated = await UserMeta.findOneAndUpdate(
       { userId },
-      { whitelistedIPs },
-      { new: true }
+      { whitelistedIPs, clientId: req.user.clientId },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
     if (!updated) return next(new AppError('User meta not found', 404));
