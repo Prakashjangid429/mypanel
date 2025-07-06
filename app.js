@@ -20,6 +20,7 @@ import reportsRoutes from './routes/report.routes.js'
 import { protect, restrictTo } from './middleware/auth.js';
 import { errors } from 'celebrate';
 import axios from 'axios';
+import { getWalletAnalytics } from './routes/utility.routes.js';
 
 
 const app = express();
@@ -50,6 +51,7 @@ app.use('/api/v1/payIn', protect, restrictTo('Admin'), payinApisRoutes);
 app.use('/api/v1/payOut', protect, restrictTo('Admin'), payoutApisRoutes);
 app.use('/api/v1/payment', payinRoutes);
 app.use('/api/v1/report', protect, reportsRoutes)
+app.get('/api/v1/analytics', protect, getWalletAnalytics)
 
 app.post('/dummy-gateway', async (req, res) => {
   const { txnId, amount, name, email, mobileNumber } = req.body;
