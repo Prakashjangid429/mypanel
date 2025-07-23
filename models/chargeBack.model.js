@@ -7,7 +7,7 @@ const chargebackSchema = new Schema(
       ref: "user",
       required: true,
     },
-    trxId: {
+    txnId: {
       type: String,
       required: true,
       index: true,
@@ -17,27 +17,37 @@ const chargebackSchema = new Schema(
       type: String,
       required: true,
     },
-    requestedAt: {
-      type: Date,
-      default: Date.now,
-    },
     status: {
       type: String,
-      enum: ["Requested", "Approved", "Rejected"],
-      default: "Requested",
+      enum: ["Pending", "Failed", "Success"],
+      default: "Success",
     },
-    reviewedAt: Date,
-    reviewedBy: {
-      type: Schema.Types.ObjectId,
-      ref: "user",
+    amount: {
+      type: Number,
+      required: true,
+      min: 0
     },
-    adminRemarks: {
+    charges: {
+      type: Number,
+      default: 0
+    },
+    payerName: {
       type: String,
+      default: ''
     },
+    description: {
+      type: String,
+      default: ''
+    },
+    utr: {
+      type: String,
+      required: true
+    },
+    vpaId: {
+      type: String,
+    }
   },
   { timestamps: true }
 );
 
-// chargebackSchema.index({ trxId: 1 });
-
-export default model("ChargebackRequest", chargebackSchema);
+export default model("Chargebacks", chargebackSchema);

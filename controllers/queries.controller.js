@@ -4,8 +4,8 @@ import AppError from "../utils/appError.js";
 // Create a new query
 export const createQuery = async (req, res, next) => {
   try {
-    const { subject, message, category, priority, attachments } = req.body;
-    
+    const { subject, message, category, priority } = req.body;
+
     const query = await Query.create({
       userId: req.user._id,
       userName: req.user.userName || req.user.email,
@@ -14,7 +14,7 @@ export const createQuery = async (req, res, next) => {
       message,
       category,
       priority: priority || "medium",
-      attachments: attachments || [],
+      attachments: [`/uploads/${req.file.filename}`] || [],
     });
 
     res.status(201).json({
@@ -29,14 +29,14 @@ export const createQuery = async (req, res, next) => {
 // Get all queries (with filters)
 export const getQueries = async (req, res, next) => {
   try {
-    const { 
-      status, 
-      priority, 
-      category, 
-      search, 
-      assignedTo, 
+    const {
+      status,
+      priority,
+      category,
+      search,
+      assignedTo,
       userId,
-      fromDate, 
+      fromDate,
       toDate,
       sortBy = "createdAt",
       order = -1,
@@ -46,14 +46,14 @@ export const getQueries = async (req, res, next) => {
 
     // Build filter object
     const filter = {};
-    
+
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
     if (category) filter.category = category;
     if (assignedTo) filter.assignedTo = assignedTo;
-    
+
     // For regular users, only show their own queries
-    if (!req.user.roles.includes("Admin") && !req.user.roles.includes("Support")) {
+    if (req?.user?.role !== "Admin") {
       filter.userId = req.user._id;
     } else if (userId) {
       filter.userId = userId;
@@ -75,10 +75,9 @@ export const getQueries = async (req, res, next) => {
 
     const [queries, total] = await Promise.all([
       Query.find(filter)
-        .sort({ [sortBy]: order })
+        .sort({ [sortBy]: Number(order) })
         .skip(skip)
-        .limit(limit)
-        .populate("assignedTo", "userName email"),
+        .limit(limit),
       Query.countDocuments(filter),
     ]);
 
@@ -101,20 +100,10 @@ export const getQueries = async (req, res, next) => {
 export const getQueryById = async (req, res, next) => {
   try {
     const query = await Query.findById(req.params.id)
-      .populate("assignedTo", "userName email")
       .populate("userId", "userName email");
 
     if (!query) {
       return next(new AppError("Query not found", 404));
-    }
-
-    // Check if user has access
-    if (
-      !req.user.roles.includes("Admin") && 
-      !req.user.roles.includes("Support") && 
-      query.userId.toString() !== req.user._id.toString()
-    ) {
-      return next(new AppError("Not authorized to access this query", 403));
     }
 
     res.status(200).json({
@@ -130,7 +119,7 @@ export const getQueryById = async (req, res, next) => {
 export const updateQuery = async (req, res, next) => {
   try {
     const { status, resolutionNotes, assignedTo } = req.body;
-    
+
     const updateFields = {};
     if (status) updateFields.status = status;
     if (resolutionNotes) updateFields.resolutionNotes = resolutionNotes;

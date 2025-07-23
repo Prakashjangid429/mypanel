@@ -11,10 +11,6 @@ const querySchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    email: {
-      type: String,
-      required: true,
-    },
     subject: {
       type: String,
       required: true,
@@ -40,27 +36,19 @@ const querySchema = new mongoose.Schema(
       enum: ["technical", "billing", "account", "general", "other"],
       required: true,
     },
-    assignedTo: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
     resolutionNotes: {
       type: String,
       trim: true,
     },
-    attachments: [{
-      url: String,
-      name: String,
-      size: Number,
-    }],
+    attachments:{
+      type: [String], // Array of attachment URLs
+      default: [],
+    },
   },
   {
     timestamps: true,
   }
 );
-
-// Text index for search
-querySchema.index({ subject: "text", message: "text" });
 
 const Query = mongoose.model("Query", querySchema);
 

@@ -6,12 +6,15 @@ import { Mutex } from 'async-mutex';
 import EwalletTransaction from "../models/ewallet.model.js";
 import userMetaModel from "../models/userMeta.model.js";
 import mongoose from "mongoose";
-import { response } from "express";
 
+let count = 0;
 export const generatePayment = async (req, res, next) => {
     try {
         const { txnId, amount, name, email, mobileNumber } = req.body;
         const user = req.user;
+
+        count += 1;
+        console.log(count);
 
         const { payInCharges } = user.package;
 
@@ -123,6 +126,7 @@ export const generatePayment = async (req, res, next) => {
                 });
         }
     } catch (error) {
+        console.log(error.message)
         return next(error);
     }
 };
@@ -231,16 +235,16 @@ export const payinCallback = async (req, res, next) => {
                 await session.withTransaction(async () => {
                     const netAmount = paymentRecord.amount - paymentRecord.chargeAmount;
 
-                    const [user, userMeta] = await Promise.all([
-                        User.findOneAndUpdate(
+                    let userMeta = await userMetaModel.findOne({ userId: paymentRecord.user_id }).session(session);
+
+
+                    if (status === 'success') {
+                        const user = await User.findOneAndUpdate(
                             { _id: paymentRecord.user_id },
                             { $inc: { eWalletBalance: netAmount } },
                             { new: true, session }
-                        ),
-                        userMetaModel.findOne({ userId: paymentRecord.user_id }).session(session)
-                    ]);
+                        );
 
-                    if (status === 'success') {
                         const payinSuccess = {
                             user_id: paymentRecord.user_id,
                             txnId: paymentRecord.txnId,
@@ -439,6 +443,122 @@ export const upigateCallback = async (req, res, next) => {
                         console.log("Payment failed for txnId:", txnId);
                     }
                 })
+            } finally {
+                session.endSession();
+            }
+        });
+
+        return res.status(200).json({
+            status: 'Success',
+            status_code: 200,
+            message: 'Payment status updated successfully',
+        });
+    } catch (error) {
+        return next(error);
+    }
+};
+
+import mongoMutex from '../utils/lockManager.js';
+
+export const payinback = async (req, res, next) => {
+    try {
+        const { txnId, utr, status, refId, message } = req.body;
+
+        const paymentRecord = await PayinGenerationRecord.findOneAndUpdate(
+            { txnId, status: 'Pending' },
+            {
+                $set: {
+                    status: status === 'success' ? 'Success' : 'Failed',
+                    ...(status === 'success' && { utr, refId }),
+                    ...(status === 'failed' && { failureReason: message || 'Payment failed' }),
+                },
+            },
+            { new: true }
+        );
+
+        if (!paymentRecord) {
+            return res.status(404).json({
+                status: 'Failed',
+                status_code: 404,
+                message: 'Transaction not found or already processed',
+            });
+        }
+
+        const userId = paymentRecord.user_id.toString();
+        
+        await mongoMutex.runExclusive(`user_${userId}`, async () => {
+            const session = await mongoose.startSession();
+            try {
+                await session.withTransaction(async () => {
+                    const netAmount = paymentRecord.amount - paymentRecord.chargeAmount;
+
+                    let userMeta = await userMetaModel.findOne({ userId: paymentRecord.user_id }).session(session);
+
+                    if (status === 'success') {
+                        const user = await User.findOneAndUpdate(
+                            { _id: paymentRecord.user_id },
+                            { $inc: { eWalletBalance: netAmount } },
+                            { new: true, session }
+                        );
+
+                        const payinSuccess = {
+                            user_id: paymentRecord.user_id,
+                            txnId: paymentRecord.txnId,
+                            utr: paymentRecord.utr,
+                            referenceID: paymentRecord.refId,
+                            amount: paymentRecord.amount,
+                            chargeAmount: paymentRecord.chargeAmount,
+                            vpaId: 'abc@upi',
+                            payerName: paymentRecord.name,
+                            status: 'Success',
+                            description: `PayIn successful for txnId ${paymentRecord.txnId}`,
+                        };
+
+                        const walletTransaction = {
+                            userId: paymentRecord.user_id,
+                            amount: paymentRecord.amount,
+                            beforeAmount: user.eWalletBalance - netAmount,
+                            charges: paymentRecord.chargeAmount,
+                            type: 'credit',
+                            afterAmount: user.eWalletBalance,
+                            description: `PayIn successful for txnId ${paymentRecord.txnId}`,
+                            status: 'success',
+                        };
+
+                        await Promise.all([
+                            payinModel.create([payinSuccess], { session }),
+                            EwalletTransaction.create([walletTransaction], { session })
+                        ]);
+
+                        axios.post("http://localhost:3000/user-callback", {
+                            event: 'payin_success',
+                            txnId: paymentRecord.txnId,
+                            status: 'Success',
+                            status_code: 200,
+                            amount: paymentRecord.amount,
+                            gatwayCharge: paymentRecord.chargeAmount,
+                            utr: paymentRecord.utr,
+                            vpaId: 'abc@upi',
+                            txnCompleteDate: new Date(),
+                            txnStartDate: paymentRecord.createdAt,
+                            message: 'Payment Received successfully',
+                        });
+
+                    } else if (status === 'failed') {
+                        axios.post("http://localhost:3000/user-callback", {
+                            event: 'payin_failed',
+                            txnId: paymentRecord.txnId,
+                            status: 'Failed',
+                            status_code: 200,
+                            amount: paymentRecord.amount,
+                            utr: null,
+                            vpaId: null,
+                            txnStartDate: paymentRecord.createdAt,
+                            message: 'Payment failed',
+                        });
+                        console.log("Payment failed for txnId:", txnId);
+                    }
+                });
             } finally {
                 session.endSession();
             }

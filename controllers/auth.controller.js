@@ -5,6 +5,7 @@ import catchAsync from '../utils/catchAsync.js';
 import EwalletTransaction from '../models/ewallet.model.js';
 import MainWalletTransaction from '../models/mainWallet.model.js';
 import payoutRecordModel from '../models/payoutRecord.model.js';
+import settlementModel from '../models/settlement.model.js';
 
 const generateTokens = (user) => {
   const accessToken = user.generateAccessToken();
@@ -526,7 +527,7 @@ export const toggleUserStatus = async (req, res, next) => {
 
   } catch (error) {
     return next(error);
-  } 
+  }
 };
 
 export const updateUserByAdmin = async (req, res, next) => {
@@ -705,7 +706,6 @@ export const eWalletToMainWalletSettlement = async (req, res, next) => {
         userId,
         amount,
         type: 'credit',
-        totalAmount: amount,
         description: `Amount credit from settlement from E-Wallet`,
         beforeAmount: beforeMainWalletBalance,
         afterAmount: afterMainWalletBalance,
@@ -784,7 +784,7 @@ export const bankSettlement = async (req, res) => {
         amount: amount,
         charges: gatewayCharge,
         type: 'debit',
-        description: `Bank transfer to ${accountHolderName} (${accountNumber.slice(-4)})`,
+        description: `Bank transfer to ${accountHolderName} (${accountNumber})`,
         beforeAmount: beforeMainWalletBalance,
         afterAmount: afterMainWalletBalance,
         status: 'success' // Will update to success when bank confirms
@@ -793,39 +793,128 @@ export const bankSettlement = async (req, res) => {
 
       const trxId = `BANK-${Date.now()}`;
 
-      // Create payout report record
-      const payoutReport = new payoutRecordModel({
+      const settlement = new settlementModel({
         user_id: user._id,
-        mobileNumber: mobileNumber || user.mobileNumber,
+        amount,
+        gatewayCharge,
         accountHolderName,
         accountNumber,
         ifscCode,
-        utr,
         bankName: bankName || 'N/A',
         upiId: upiId || '',
-        amount,
-        gatewayCharge,
+        mobileNumber: mobileNumber || user.mobileNumber,
+        utr,
         trxId,
-        gateWayId: 'Settlement',
-        status: 'Success',
-        failureReason: ''
+        status: 'Success'
       });
-      await payoutReport.save({ session });
+      await settlement.save({ session });
 
       await session.commitTransaction();
       session.endSession();
 
       return res.status(200).json({
-        success: true, 
+        success: true,
         message: 'Bank transfer initiated successfully'
       });
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
       throw error;
-    }  
+    }
   } catch (error) {
     console.error('Error in bank settlement:', error);
     return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+export const mainWalletToEWalletSettlement = async (req, res, next) => {
+  try {
+    const { userId, amount } = req.body;
+
+    // Validate input
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a valid amount'
+      });
+    }
+
+    // Get user with current balances
+    const user = await User.findById(userId)
+      .select('+trxPassword eWalletBalance upiWalletBalance');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check sufficient balance in main wallet
+    if (user.upiWalletBalance < amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient Main Wallet balance'
+      });
+    }
+
+    // Start transaction
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // Update user balances
+      const beforeMainWalletBalance = user.upiWalletBalance;
+      const afterMainWalletBalance = beforeMainWalletBalance - amount;
+      const beforeEWalletBalance = user.eWalletBalance;
+      const afterEWalletBalance = beforeEWalletBalance + amount;
+
+      user.upiWalletBalance = afterMainWalletBalance;
+      user.eWalletBalance = afterEWalletBalance;
+      await user.save({ session });
+
+      // Create main wallet debit transaction
+      const mainWalletTransaction = new MainWalletTransaction({
+        userId,
+        amount,
+        type: 'debit',
+        description: `Settlement to E-Wallet`,
+        beforeAmount: beforeMainWalletBalance,
+        afterAmount: afterMainWalletBalance,
+        status: 'success'
+      });
+      await mainWalletTransaction.save({ session });
+
+      // Create eWallet credit transaction
+      const eWalletTransaction = new EwalletTransaction({
+        userId,
+        amount,
+        charges:0,
+        type: 'credit',
+        description: `Amount credit from Main Wallet settlement`,
+        beforeAmount: beforeEWalletBalance,
+        afterAmount: afterEWalletBalance,
+        status: 'success'
+      });
+      await eWalletTransaction.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Funds transferred successfully',
+        data: {
+          newMainWalletBalance: afterMainWalletBalance,
+          newEWalletBalance: afterEWalletBalance
+        }
+      });
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  } catch (error) {
+    return next(error);
   }
 };

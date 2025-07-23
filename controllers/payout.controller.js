@@ -3,8 +3,6 @@ import userDB from "../models/User.js";
 import walletModel from "../models/EwalletTransaction.js";
 import payOutModel from "../models/PayOutModel.js";
 import payOutModelGenerate from "../models/PayOutModelGenerate.js";
-import AESUtils from "../utils/AESUtils.js";
-import moment from "moment";
 
 // Your existing asyncHandler wrapper or use try-catch
 export const generatePayOut = async (req, res) => {
@@ -187,16 +185,6 @@ const performPayoutApiCall = async (payOutApi, payload, user, chargeAmount, fina
     switch (payOutApi.apiName) {
         case "iServerEuApi":
             return callIServerEuApi(payload);
-        case "ImpactPeekSoftwareApi":
-            return callImpactPeekSoftwareApi(payload);
-        case "waayupayPayOutApi":
-            return callWaayupayPayOutApi(payload);
-        case "iSmartPayPayoutApi":
-            return callISmartPayPayoutApi(payload);
-        case "flipzikPayoutApi":
-            return callFlipzikPayoutApi(payload);
-        case "proConceptPayoutApi":
-            return callProConceptPayoutApi(payload);
         default:
             throw new Error("Unsupported payout API");
     }

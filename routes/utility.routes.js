@@ -20,11 +20,11 @@ export const getWalletAnalytics = async (req, res) => {
     let days;
     
     switch(range) {
-      case '7d': days = 7; break;
+      case '7d': days = 3; break;
       case '30d': days = 30; break;
       case '90d': days = 90; break;
       case '1y': days = 365; break;
-      default: days = 7;
+      default: days = 3;
     }
     
     const { startDate, endDate } = getDateRange(days);
@@ -136,10 +136,6 @@ export const getWalletAnalytics = async (req, res) => {
       
       // Get daily data for charts
       const dailyData = await getDailyTransactionData(startDate, endDate);
-      
-      // Get last 3 days analytics
-      const last3Days = await getLastNDaysAnalytics(3);
-      
       // Prepare response
       const response = {
         success: true,
@@ -179,18 +175,12 @@ export const getWalletAnalytics = async (req, res) => {
             totalCharges: payouts[0]?.totalCharges || 0,
             count: payouts[0]?.count || 0
           },
-          
-          // Chart data
           dailyData,
-          
-          // Recent analytics
-          last3Days
         }
       };
       
       return res.status(200).json(response);
     } 
-    // For regular users - show only their data
     else {
       const userId = req.user._id;
       
@@ -293,10 +283,6 @@ export const getWalletAnalytics = async (req, res) => {
       // Get daily data for charts
       const dailyData = await getDailyUserTransactionData(userId, startDate, endDate);
       
-      // Get last 3 days analytics
-      const last3Days = await getUserLastNDaysAnalytics(userId, 3);
-      
-      // Prepare response
       const response = {
         success: true,
         data: {
@@ -337,9 +323,6 @@ export const getWalletAnalytics = async (req, res) => {
           
           // Chart data
           dailyData,
-          
-          // Recent analytics
-          last3Days
         }
       };
       
@@ -527,118 +510,4 @@ async function getDailyUserTransactionData(userId, startDate, endDate) {
   };
   
   return dailyData;
-}
-
-// Helper function to get last N days analytics (admin)
-async function getLastNDaysAnalytics(days) {
-  const result = [];
-  
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
-    
-    const [payIns, payOuts] = await Promise.all([
-      PayinGenerationRecord.aggregate([
-        {
-          $match: {
-            status: "Success",
-            createdAt: { $gte: startOfDay, $lte: endOfDay }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            amount: { $sum: "$amount" },
-            count: { $sum: 1 }
-          }
-        }
-      ]),
-      
-      PayoutReport.aggregate([
-        {
-          $match: {
-            status: "Success",
-            createdAt: { $gte: startOfDay, $lte: endOfDay }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            amount: { $sum: "$amount" },
-            count: { $sum: 1 }
-          }
-        }
-      ])
-    ]);
-    
-    result.push({
-      date: startOfDay.toISOString().split('T')[0],
-      payInAmount: payIns[0]?.amount || 0,
-      payInCount: payIns[0]?.count || 0,
-      payOutAmount: payOuts[0]?.amount || 0,
-      payOutCount: payOuts[0]?.count || 0
-    });
-  }
-  
-  return result;
-}
-
-// Helper function to get last N days analytics (user)
-async function getUserLastNDaysAnalytics(userId, days) {
-  const result = [];
-  
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-    const startOfDay = new Date(date.setHours(0, 0, 0, 0));
-    const endOfDay = new Date(date.setHours(23, 59, 59, 999));
-    
-    const [payIns, payOuts] = await Promise.all([
-      PayinGenerationRecord.aggregate([
-        {
-          $match: {
-            user_id:new mongoose.Types.ObjectId(userId),
-            status: "Success",
-            createdAt: { $gte: startOfDay, $lte: endOfDay }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            amount: { $sum: "$amount" },
-            count: { $sum: 1 }
-          }
-        }
-      ]),
-      
-      PayoutReport.aggregate([
-        {
-          $match: {
-            user_id: new mongoose.Types.ObjectId(userId),
-            status: "Success",
-            createdAt: { $gte: startOfDay, $lte: endOfDay }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            amount: { $sum: "$amount" },
-            count: { $sum: 1 }
-          }
-        }
-      ])
-    ]);
-    
-    result.push({
-      date: startOfDay.toISOString().split('T')[0],
-      payInAmount: payIns[0]?.amount || 0,
-      payInCount: payIns[0]?.count || 0,
-      payOutAmount: payOuts[0]?.amount || 0,
-      payOutCount: payOuts[0]?.count || 0
-    });
-  }
-  
-  return result;
 }

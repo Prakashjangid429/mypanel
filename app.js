@@ -16,26 +16,19 @@ import packageRoutes from "./routes/package.routes.js";
 import payinApisRoutes from './routes/payinApis.routes.js';
 import payoutApisRoutes from './routes/payoutApis.routes.js';
 import payinRoutes from './routes/payin.routes.js';
-import reportsRoutes from './routes/report.routes.js'
+import reportsRoutes from './routes/report.routes.js';
+import queryRoutes from './routes/queris.routes.js';
+import uploadRoutes from './routes/upload.routes.js';
+import chargeBackRoutes from './routes/chargeBack.routes.js'
 import { protect, restrictTo } from './middleware/auth.js';
 import { errors } from 'celebrate';
 import axios from 'axios';
 import { getWalletAnalytics } from './routes/utility.routes.js';
 
-
 const app = express();
 
-app.use(helmet());
 app.use(cors());
-// app.use(logRequest);
 
-const limiter = rateLimit({
-  max: 100,
-  windowMs: 1 * 60 * 1000,
-  message: 'Too many requests from this IP, please try again after 15 minutes'
-});
-
-// app.use('/api', limiter);
 // app.use(morgan());
 // app.use(xss());
 // app.use(mongoSanitize());
@@ -44,19 +37,23 @@ app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 app.use(compression({ threshold: 1024 }));
 
+
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/user-meta', userMetaRoutes);
 app.use('/api/v1/package', logRequest, packageRoutes);
 app.use('/api/v1/payIn', protect, restrictTo('Admin'), payinApisRoutes);
 app.use('/api/v1/payOut', protect, restrictTo('Admin'), payoutApisRoutes);
-app.use('/api/v1/payment', payinRoutes);
+app.use('/api/v1/payment',logRequest, payinRoutes);
 app.use('/api/v1/report', protect, reportsRoutes)
+app.use('/api/v1/query', protect, queryRoutes)
+app.use('/api/v1/upload', protect, uploadRoutes);
 app.get('/api/v1/analytics', protect, getWalletAnalytics)
+app.use('/api/v1/chargebacks',chargeBackRoutes)
 
 app.post('/dummy-gateway', async (req, res) => {
   const { txnId, amount, name, email, mobileNumber } = req.body;
 
-  const isSuccess = true // 80% chance success
+  const isSuccess = false // 80% chance success
   const delay = Math.floor(Math.random() * 1000 + 1000); // delay between 1-4 seconds
 
   const callbackURL = "http://localhost:3000/api/v1/payment/callback"; // your callback receiver route
@@ -79,7 +76,7 @@ app.post('/dummy-gateway', async (req, res) => {
       utr: isSuccess ? `UTR${txnId}` : null,
     });
   } catch (callbackError) {
-    console.error("Callback failed:", callbackError?.response?.data?.message || callbackError.message);
+    console.error("Callback failed:", callbackError?.response);
   }
 
   res.json(responsePayload);

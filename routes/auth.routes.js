@@ -14,7 +14,8 @@ import {
   switchUserApis,
   bulkSwitchApis,
   bankSettlement,
-  eWalletToMainWalletSettlement
+  eWalletToMainWalletSettlement,
+  mainWalletToEWalletSettlement
 } from '../controllers/auth.controller.js';
 import { protect, restrictTo } from '../middleware/auth.js';
 
@@ -42,5 +43,6 @@ router.put('/switch/:userId', switchUserApis);
 router.put('/bulk', bulkSwitchApis);
 router.post('/settlement/bank',bankSettlement)
 router.post("/settlement/wallet",eWalletToMainWalletSettlement)
+router.post("/settlement/maintoEwallet",mainWalletToEWalletSettlement)
 
 export default router;

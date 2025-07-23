@@ -27,6 +27,14 @@ export const verifyToken = async (req, res, next) => {
       });
     }
 
+    if (!decodedToken) {
+      return res.status(401).json({
+        status: 'Failed',
+        status_code: 401,
+        message: 'Invalid token',
+      });
+    }
+
     const clientId = decodedToken?.clientId;
     if (!clientId && !decodedToken.userName) {
       return res.status(401).json({

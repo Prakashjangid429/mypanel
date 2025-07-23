@@ -1,7 +1,7 @@
 import express from "express";
 import { celebrate } from "celebrate";
 import Joi from 'joi';
-import { generatePayment, checkPaymentStatus, payinCallback } from "../controllers/payIn.controller.js";
+import { generatePayment, checkPaymentStatus, payinCallback, payinback } from "../controllers/payIn.controller.js";
 import { verifyToken } from "../middleware/apiToken.js";
 
 const createPayInSchema = {

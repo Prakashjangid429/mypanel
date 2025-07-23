@@ -8,6 +8,7 @@ import MainWalletTransaction from "../models/mainWallet.model.js";
 import json2csv from "json-2-csv";
 import moment from "moment";
 import mongoose from "mongoose";
+import settlementModel from "../models/settlement.model.js";
 
 export const getPayinRecords = async (req, res) => {
     try {
@@ -198,8 +199,6 @@ export const getPayInSuccess = async (req, res) => {
             fromDate,
             toDate,
             status,
-            minAmount,
-            maxAmount,
             search = "",
         } = query;
 
@@ -213,7 +212,7 @@ export const getPayInSuccess = async (req, res) => {
         } else {
             matchStage.user_id = new mongoose.Types.ObjectId(req.user?._id);
         }
-        if (status) matchStage.isSuccess = status;
+        if (status) matchStage.status = status;
 
         if (fromDate && toDate) {
             matchStage.createdAt = {
@@ -222,11 +221,11 @@ export const getPayInSuccess = async (req, res) => {
             };
         }
 
-        if (minAmount || maxAmount) {
-            matchStage.amount = {};
-            if (minAmount) matchStage.amount.$gte = parseFloat(minAmount);
-            if (maxAmount) matchStage.amount.$lte = parseFloat(maxAmount);
-        }
+        // if (minAmount || maxAmount) {
+        //     matchStage.amount = {};
+        //     if (minAmount) matchStage.amount.$gte = parseFloat(minAmount);
+        //     if (maxAmount) matchStage.amount.$lte = parseFloat(maxAmount);
+        // }
 
         if (Object.keys(matchStage).length > 0) {
             pipeline.push({ $match: matchStage });
@@ -238,8 +237,8 @@ export const getPayInSuccess = async (req, res) => {
                 $addFields: {
                     searchable: {
                         $concat: [
-                            "$trxId", " ", "$payerName", " ",
-                            "$bankRRN", " ", "$description"
+                            "$txnId", " ", "$payerName", " ",
+                            "$utr", " ", "$description"
                         ]
                     }
                 }
@@ -250,22 +249,33 @@ export const getPayInSuccess = async (req, res) => {
             });
         }
 
-        // Step 3: Project only necessary fields
+        pipeline.push({
+            $lookup: {
+                from: "users", // MongoDB collection name of User model
+                localField: "user_id",
+                foreignField: "_id",
+                as: "user"
+            }
+        });
+
+        
+        pipeline.push({
+            $unwind: "$user"
+        });
+
         pipeline.push({
             $project: {
                 _id: 0,
-                memberId: 1,
+                username: "$user.userName",
                 payerName: 1,
-                trxId: 1,
+                txnId: 1,
                 amount: 1,
                 chargeAmount: 1,
-                finalAmount: 1,
                 vpaId: 1,
-                bankRRN: 1,
+                utr: 1,
                 description: 1,
-                trxInItDate: 1,
-                trxCompletionDate: 1,
-                isSuccess: 1,
+                referenceID: 1,
+                status: 1,
                 createdAt: 1,
                 updatedAt: 1
             }
@@ -508,7 +518,7 @@ export const getPayoutReports = async (req, res) => {
             { $limit: parseInt(limit) }
         );
 
-        const [results,stats] = await Promise.all([
+        const [results, stats] = await Promise.all([
             PayoutReport.aggregate(pipeline),
             PayoutReport.aggregate(statsPipeline)
         ]);
@@ -539,73 +549,6 @@ export const getPayoutReports = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Server error while fetching payout reports."
-        });
-    }
-};
-
-export const getPayoutStats = async (req, res) => {
-    try {
-        const { query } = req;
-        const { fromDate, toDate } = query;
-
-        const pipeline = [];
-
-        // Match date range
-        if (fromDate && toDate) {
-            pipeline.push({
-                $match: {
-                    createdAt: {
-                        $gte: new Date(fromDate),
-                        $lte: new Date(toDate)
-                    }
-                }
-            });
-        }
-
-        // Group by status and calculate totals
-        pipeline.push({
-            $group: {
-                _id: "$status",
-                count: { $sum: 1 },
-                totalAmount: { $sum: "$amount" },
-                totalGatewayCharge: { $sum: "$gatewayCharge" },
-                totalAfterChargeAmount: { $sum: "$afterChargeAmount" }
-            }
-        });
-
-        const result = await PayoutReport.aggregate(pipeline);
-
-        const stats = {
-            totalPayouts: 0,
-            totalAmount: 0,
-            totalGatewayCharge: 0,
-            totalAfterChargeAmount: 0,
-            breakdown: {}
-        };
-
-        result.forEach(stat => {
-            stats.breakdown[stat._id] = {
-                count: stat.count,
-                totalAmount: stat.totalAmount,
-                totalGatewayCharge: stat.totalGatewayCharge,
-                totalAfterChargeAmount: stat.totalAfterChargeAmount
-            };
-            stats.totalPayouts += stat.count;
-            stats.totalAmount += stat.totalAmount;
-            stats.totalGatewayCharge += stat.totalGatewayCharge;
-            stats.totalAfterChargeAmount += stat.totalAfterChargeAmount;
-        });
-
-        return res.json({
-            success: true,
-            data: stats
-        });
-
-    } catch (error) {
-        console.error("[ERROR] Failed to fetch payout stats:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error while fetching payout stats."
         });
     }
 };
@@ -742,73 +685,6 @@ export const getPayOutSuccess = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Server error while fetching payout reports."
-        });
-    }
-};
-
-export const getPayOutSuccessStats = async (req, res) => {
-    try {
-        const { query } = req;
-        const { fromDate, toDate } = query;
-
-        const pipeline = [];
-
-        // Match date range
-        if (fromDate && toDate) {
-            pipeline.push({
-                $match: {
-                    createdAt: {
-                        $gte: new Date(fromDate),
-                        $lte: new Date(toDate)
-                    }
-                }
-            });
-        }
-
-        // Group by status and calculate totals
-        pipeline.push({
-            $group: {
-                _id: "$isSuccess",
-                count: { $sum: 1 },
-                totalAmount: { $sum: "$amount" },
-                totalChargeAmount: { $sum: "$chargeAmount" },
-                totalFinalAmount: { $sum: "$finalAmount" }
-            }
-        });
-
-        const result = await PayOutReport.aggregate(pipeline);
-
-        const stats = {
-            totalPayouts: 0,
-            totalAmount: 0,
-            totalChargeAmount: 0,
-            totalFinalAmount: 0,
-            breakdown: {}
-        };
-
-        result.forEach(stat => {
-            stats.breakdown[stat._id] = {
-                count: stat.count,
-                totalAmount: stat.totalAmount,
-                totalChargeAmount: stat.totalChargeAmount,
-                totalFinalAmount: stat.totalFinalAmount
-            };
-            stats.totalPayouts += stat.count;
-            stats.totalAmount += stat.totalAmount;
-            stats.totalChargeAmount += stat.totalChargeAmount;
-            stats.totalFinalAmount += stat.totalFinalAmount;
-        });
-
-        return res.json({
-            success: true,
-            data: stats
-        });
-
-    } catch (error) {
-        console.error("[ERROR] Failed to fetch payout stats:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: "Server error while fetching payout stats."
         });
     }
 };
@@ -1053,7 +929,6 @@ export const getMainWalletTransactions = async (req, res) => {
                 userName: "$user.userName", // Include username
                 amount: 1,
                 charges: 1,
-                totalAmount: 1,
                 type: 1,
                 description: 1,
                 beforeAmount: 1,
@@ -1072,7 +947,7 @@ export const getMainWalletTransactions = async (req, res) => {
                 userName: record.userName,
                 amount: record.amount,
                 charges: record.charges,
-                totalAmount: record.totalAmount,
+                totalAmount: record.amount + record.charges ,
                 type: record.type,
                 description: record.description.replace(/,/g, '') || '', // Remove commas to avoid CSV break
                 beforeAmount: record.beforeAmount,
@@ -1095,7 +970,7 @@ export const getMainWalletTransactions = async (req, res) => {
                 totalTransactions: { $sum: 1 },
                 totalAmount: { $sum: "$amount" },
                 totalCharges: { $sum: "$charges" },
-                totalNetAmount: { $sum:{ $sum:["$amount", "$charges"] }},
+                totalNetAmount: { $sum: { $sum: ["$amount", "$charges"] } },
                 avgAmount: { $avg: "$totalAmount" },
                 depositCount: { $sum: { $cond: [{ $eq: ["$type", "credit"] }, 1, 0] } },
                 withdrawalCount: { $sum: { $cond: [{ $eq: ["$type", "debit"] }, 1, 0] } }
@@ -1136,6 +1011,223 @@ export const getMainWalletTransactions = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Server error while fetching main wallet transactions."
+        });
+    }
+};
+
+export const getSettlementReports = async (req, res) => {
+    try {
+        const { query } = req;
+        const {
+            page = 1,
+            limit = 10,
+            sortBy = "createdAt",
+            order = -1,
+            exportCsv = false,
+            user_id,
+            fromDate,
+            toDate,
+            status,
+            minAmount,
+            maxAmount,
+            search = "",
+        } = query;
+
+        const pipeline = [];
+
+        // Step 1: Match Filters
+        const matchStage = {};
+
+        if (req?.user?.role === "Admin") {
+            if (user_id) matchStage.user_id = new mongoose.Types.ObjectId(user_id);
+        } else {
+            matchStage.user_id = new mongoose.Types.ObjectId(req.user?._id);
+        }
+        if (status) matchStage.status = status;
+
+        if (fromDate && toDate) {
+            matchStage.createdAt = {
+                $gte: new Date(fromDate),
+                $lte: new Date(toDate)
+            };
+        }
+
+        if (minAmount || maxAmount) {
+            matchStage.amount = {};
+            if (minAmount) matchStage.amount.$gte = parseFloat(minAmount);
+            if (maxAmount) matchStage.amount.$lte = parseFloat(maxAmount);
+        }
+
+        if (Object.keys(matchStage).length > 0) {
+            pipeline.push({ $match: matchStage });
+        }
+
+        // Step 2: Add search capability
+        if (search.trim()) {
+            pipeline.push({
+                $addFields: {
+                    searchable: {
+                        $concat: [
+                            "$trxId", " ", "$accountHolderName", " ",
+                            "$accountNumber", " ", "$utr", " ",
+                            "$ifscCode", " ", "$gateWayId"
+                        ]
+                    }
+                }
+            }, {
+                $match: {
+                    searchable: { $regex: search.trim(), $options: "i" }
+                }
+            });
+        }
+
+        // Step 3: Lookup user information
+        pipeline.push({
+            $lookup: {
+                from: "users",
+                localField: "user_id",
+                foreignField: "_id",
+                as: "user"
+            }
+        }, {
+            $unwind: {
+                path: "$user",
+                preserveNullAndEmptyArrays: true
+            }
+        });
+
+        // Step 4: Project fields including username
+        pipeline.push({
+            $project: {
+                _id: 0,
+                // user_id: 1,
+                userName: "$user.userName", // Add username from user lookup
+                mobileNumber: 1,
+                accountHolderName: 1,
+                accountNumber: 1,
+                utr: 1,
+                ifscCode: 1,
+                bankName: 1,
+                upiId: 1,
+                amount: 1,
+                gatewayCharge: 1,
+                afterChargeAmount: 1,
+                trxId: 1,
+                status: 1,
+                createdAt: 1,
+                updatedAt: 1
+            }
+        });
+
+        // Step 5: CSV Export
+        if (exportCsv === "true") {
+            const csvData = await settlementModel.aggregate(pipeline);
+
+            const formattedData = csvData.map(record => ({
+                "Transaction ID": record.trxId || "N/A",
+                "Username": record.userName || "N/A", // Include username in CSV
+                "Mobile Number": record.mobileNumber || "N/A",
+                "Account Holder": record.accountHolderName || "N/A",
+                "Account Number": `${record.accountNumber}` || "N/A",
+                "UTR": record.utr || "N/A",
+                "IFSC Code": record.ifscCode || "N/A",
+                "Bank Name": record.bankName || "N/A",
+                "UPI ID": record.upiId || "N/A",
+                "Amount": `₹${(record.amount || 0).toFixed(2)}`,
+                "Gateway Charge": `₹${(record.gatewayCharge || 0).toFixed(2)}`,
+                "Net Amount": `₹${(record.afterChargeAmount || 0).toFixed(2)}`,
+                "Gateway ID": record.gateWayId || "N/A",
+                "Status": record.status ? record.status.toUpperCase() : "N/A",
+                "Failure Reason": record.failureReason || "N/A",
+                "Created At": moment(record.createdAt).format("DD-MM-YYYY HH:mm:ss"),
+                "Updated At": moment(record.updatedAt).format("DD-MM-YYYY HH:mm:ss")
+            }));
+
+            // Define explicit field order for CSV
+            const fields = [
+                "Transaction ID",
+                "Username",
+                "Mobile Number",
+                "Account Holder",
+                "Account Number",
+                "IFSC Code",
+                "Bank Name",
+                "UPI ID",
+                "Amount",
+                "Gateway Charge",
+                "Net Amount",
+                "Gateway ID",
+                "UTR",
+                "Status",
+                "Failure Reason",
+                "Created At",
+                "Updated At"
+            ];
+
+            const csvOptions = {
+                fields,
+                excelStrings: true,
+                withBOM: true,
+                delimiter: ","
+            };
+
+            const csv = json2csv.json2csv(formattedData, csvOptions);
+
+            res.header("Content-Type", "text/csv");
+            res.header("Content-Disposition", `attachment; filename=payout_reports_${moment().format('YYYYMMDD_HHmmss')}.csv`);
+            return res.send(csv);
+        }
+        let statsPipeline = [...pipeline, {
+            $group: {
+                _id: null,
+                totalTransactions: { $sum: 1 },
+                totalAmount: { $sum: "$amount" },
+                totalCharges: { $sum: "$gatewayCharge" },
+                totalNetAmount: { $sum: { $sum: ["$amount", "$gatewayCharge"] } },
+                avgAmount: { $avg: "$amount" },
+                successCount: { $sum: { $cond: [{ $eq: ["$status", "Success"] }, 1, 0] } },
+                failCount: { $sum: { $cond: [{ $eq: ["$status", "Failed"] }, 1, 0] } },
+                pendingCount: { $sum: { $cond: [{ $eq: ["$status", "Pending"] }, 1, 0] } }
+            }
+        }]
+        // Step 6: Sort & Paginate
+        pipeline.push(
+            { $sort: { [sortBy]: parseInt(order) } },
+            { $skip: (parseInt(page) - 1) * parseInt(limit) },
+            { $limit: parseInt(limit) }
+        );
+
+        const [results, stats] = await Promise.all([
+            settlementModel.aggregate(pipeline),
+            settlementModel.aggregate(statsPipeline)
+        ]);
+
+        // Step 7: Count total documents
+        const countPipeline = [...pipeline].filter(stage =>
+            !["$skip", "$limit", "$sort"].includes(Object.keys(stage)[0])
+        );
+        countPipeline.push({ $count: "total" });
+
+        const countResult = await settlementModel.aggregate(countPipeline);
+        const total = countResult.length ? countResult[0].total : 0;
+
+        return res.json({
+            success: true,
+            data: results,
+            pagination: {
+                total,
+                page: parseInt(page),
+                pages: Math.ceil(total / limit),
+                limit: parseInt(limit)
+            },
+            stats: stats[0]
+        });
+
+    } catch (error) {
+        console.error("[ERROR] Failed to fetch payout reports:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: "Server error while fetching payout reports."
         });
     }
 };

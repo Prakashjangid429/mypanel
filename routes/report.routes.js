@@ -3,11 +3,10 @@ import {
     getPayinRecords,
     getPayInSuccess,
     getPayoutReports,
-    getPayoutStats,
     getPayOutSuccess,
-    getPayOutSuccessStats,
     getEwalletTransactions,
-    getMainWalletTransactions
+    getMainWalletTransactions,
+    getSettlementReports
 } from "../controllers/allReports.controller.js";
 
 const router = express.Router();
@@ -18,14 +17,12 @@ router.get("/payin/success", getPayInSuccess);
 
 router.get("/payout/reports", getPayoutReports);
 
-router.get("/payout/stats", getPayoutStats);
-
 router.get("/payout/success", getPayOutSuccess);
-
-router.get("/payout/success-stats", getPayOutSuccessStats);
 
 router.get("/ewallet/transactions", getEwalletTransactions);
 
 router.get("/mainwallet/transactions", getMainWalletTransactions);
 
-export default router;
+router.get("/settlements", getSettlementReports);
+
+export default router;  
