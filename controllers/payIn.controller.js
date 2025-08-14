@@ -6,15 +6,35 @@ import { Mutex } from 'async-mutex';
 import EwalletTransaction from "../models/ewallet.model.js";
 import userMetaModel from "../models/userMeta.model.js";
 import mongoose from "mongoose";
+import crypto from "crypto";
+import qs from 'qs';
 
-let count = 0;
+const PAYU_KEY = 'yCoqIU';
+const PAYU_SALT = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCzUfM25c2bd55Lh010CPoG47YNBlvGeqxVnUNLiPJDx3k+0xwmtfsXv478ec+eR4AytqvaSEQvEIfeXb0mIT2ENY+ijdjjmWrr6L1XMhjPNQiYDRrm5btf5wNOsd+EOfHQyjZLNq9fmM3eDqDymsq8HWaKspmEeFckHLQr/sjocgpQ0RtS60kYTPwMioLNaZeoRiVvVpuFWLv7ih+Gvkny4/sVdYluXkjdk0QsU7fiHucf9pOlc4uDGK+SEFNBudwuUE6afWHjKEeB5/kz0dTddqT25IpVX1G3jr3WLjYFaFT/8KHygCZvl1DILtxlujsch+eNDAO5TlnI0q1p3uEVAgMBAAECggEAR2pRTyFJd+u1RsY9ggNbNCg3JkvMfCj5/mTR2sDRH05PisY/9WjPdd9L/mAy4AoA0/GtUpMqWIYgXl59yLQ/UCqWqDoO0WIV05tO4O2qNMedwxShDKkcrS6PQiWT65C6LhmCcwT15kAwaQnxbn1YVX/uCTnk6v2UUuT9mnHvqKarlC/Iv5uiRcRRl1i9+tHt692MenQ86d+P/rOaG7uCDIEgJrcQqxPtJeBXbNCumZgFQwvFndq57Xo9N9wS6Qulo3Z5/SWlF1RQrIoutYs5DOlspp8bHy8zORA7/7o5ivdrRPx3x3U+yM0i+1xB+CfwocnpsScTe2YJAonB5rjXhwKBgQDPKho4KIt7+780x1I0aq9oIllp6jRx6P4Vg2x5/bU61BpJ+xGBz8Tle4CXSGiwL4Tf///OLCdWBrrK5wl/bDF9SvpZ/TVG5UeT0S3p3uUxVZkQcveXi5R8mCHUXuRzSQAQUCQvpHVgXL1b+Y7ap3xcdBHxYZN3r3twQjkvgP9xPwKBgQDdl4FwIC9C61cPQuHfbeeYbeAOj75sgHq0dAKWaaDVfKao/4Ya0BczgtFfwHmWuoGEuUBwgjmIAWTxhVNpmFBiJzFlUdXaD7hIOQ2OFNfH2Cu3hT9GwPY0mTb8U90MY5qWURVAHyiQWntUGB7oUi4mM7e+49Gtl7Wwf/x3pvbEqwKBgCsVuIpBdHD+tI+HfMNGBOEFc88hVHL0YBOdV6wvZcesYSNNwiBbU7nea6oK9yrdVyc3GL6KVEwB7ktQrZsAp3JFa7fXf4MVIEPP11qybrxJ7yGKp4+vCdy3zyFZ8u0/G3JJGJ2H+Jln8EH2rw0ulCCuSyUGhCL6LhP00evdSkMFAoGBAIDcHPJ2VOWGc881JqLGh9pVcukk4Ci6oiCUIfkUHepoHYbDaVnoTsWuulEDXfGwLadgD0AeCpSzst7cmIAcigo6Hnh8GW9Amvqs6twH9N+LLwj+3KgpiENYIeikYDRXK8tkBYaPWAhyBawGhtq1B49BngXM998KDSdBljCCkJgXAoGAcoUmi95+7WSP2acvsu5GcxTGJrW9hvNykZZMrqUI2HVDzfZKzNxGtNomweTBRZU+YPkx/NUVmjYNEPYJZLY16SoKX+6QBKRl+qmuPOBoEa0JP3bODrL+nLw20zpTyCOdIvyM7u+mkFczIfKVsvyAHbPRNCRGMjfuiTj75rEooGU=";
+
+function sha512(data) {
+    return crypto.createHash("sha512").update(data, "utf8").digest("hex");
+}
+
+function makeInitiateHash({ key, txnid, amount, productinfo, firstname, email, salt }) {
+    const hashStr = `${key}|${txnid}|${amount}|${productinfo}|${firstname}|${email}` +
+        `|||||||||||${salt}`;
+    return sha512(hashStr);
+}
+
+function getDeviceInfo(req) {
+    const ip =
+        req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
+        req.socket.remoteAddress ||
+        "";
+    const ua = req.headers["user-agent"] || "";
+    return { s2s_client_ip: ip, s2s_device_info: ua };
+}
+
 export const generatePayment = async (req, res, next) => {
     try {
         const { txnId, amount, name, email, mobileNumber } = req.body;
         const user = req.user;
-
-        count += 1;
-        console.log(count);
 
         const { payInCharges } = user.package;
 
@@ -60,6 +80,71 @@ export const generatePayment = async (req, res, next) => {
                     }
                 }
                 break;
+            case "Payin001":
+                const paymentRecor = await PayinGenerationRecord.create({
+                    user_id: user._id,
+                    gateWayId: user.payInApi?.name,
+                    txnId,
+                    amount,
+                    chargeAmount: payInCharges.limit < amount ? payInCharges.higher.chargeType == 'percentage' ? payInCharges.higher.chargeValue * amount / 100 : payInCharges.higher.chargeValue : payInCharges.lowerOrEqual.chargeType == 'percentage' ? payInCharges.lowerOrEqual.chargeValue * amount / 100 : payInCharges.lowerOrEqual.chargeValue,
+                    name,
+                    email,
+                    mobileNumber
+                });
+                try {
+
+                    const hash = makeInitiateHash({
+                        key: PAYU_KEY,
+                        txnid: txnId,
+                        amount: Number(amount).toFixed(2),
+                        productinfo: "storefront",
+                        firstname: name,
+                        email,
+                        salt: PAYU_SALT
+                    });
+
+                    const { s2s_client_ip, s2s_device_info } = getDeviceInfo(req);
+
+                    const payload = {
+                        key: PAYU_KEY,
+                        txnid: txnId,
+                        amount: Number(amount).toFixed(2),
+                        productinfo: "storefront",
+                        firstname: name,
+                        email,
+                        phone: mobileNumber,
+                        pg: "UPI",
+                        bankcode: "INTENT",
+                        txn_s2s_flow: 4,
+                        s2s_client_ip,
+                        s2s_device_info,
+                        upiAppName: 'genericintent', // enum above
+                        hash,
+                        surl: `https://mypanel-cmnj.onrender.com/api/v1/payment/callback`,
+                        furl: `https://mypanel-cmnj.onrender.com/api/v1/payment/callback`,
+                        curl: `https://mypanel-cmnj.onrender.com/api/v1/payment/callback`,
+                    };
+
+                    // IMPORTANT: PayU expects form-encoded request
+                    const { data } = await axios.post(`https://test.payu.in/_payment`, qs.stringify(payload), {
+                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                        timeout: 60000
+                    });
+                    if (data) {
+
+                        return res.status(200).json({
+                            data: data, payload
+                        })
+                    }
+                } catch (error) {
+                    if (error.code == 11000) {
+                        return res.status(500).json({ status: "Failed", status_code: 500, message: "trx Id duplicate Find !" })
+                    } else {
+                        return res.status(500).json({ status: "Failed", status_code: 500, message: error.message || "Internel Server Error !" })
+                    }
+                }
+                break;
+
             case "Pipe001":
                 const paymentRecords = await PayinGenerationRecord.create({
                     user_id: user._id,
@@ -485,7 +570,7 @@ export const payinback = async (req, res, next) => {
         }
 
         const userId = paymentRecord.user_id.toString();
-        
+
         await mongoMutex.runExclusive(`user_${userId}`, async () => {
             const session = await mongoose.startSession();
             try {
